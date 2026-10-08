@@ -1,0 +1,190 @@
+## otpauth URI Builder & Parser (feature `uri`)
+##
+## Part of the Alya Language package ecosystem (https://github.com/alya-lang).
+## Authenticator enrollment URIs (`otpauth://totp/...`, `otpauth://hotp/...`)
+## shared by QR-code provisioning flows. This module is active only when the
+## `uri` feature is enabled (see `[features]` in `alya.toml`).
+
+import "../types.alya"
+
+# Internal first-index search (empty needle matches at start).
+function find_first_internal(s: string, target: string, start_idx: int) -> int
+    let slen = len(s)
+    let tlen = len(target)
+    if tlen == 0
+        return start_idx
+    end
+    let i = start_idx
+    while i + tlen <= slen
+        if substring(s, i, tlen) == target
+            return i
+        end
+        i += 1
+    end
+    return -1
+end
+
+# Internal integer parsing for non-negative decimal query values.
+function parse_uint_internal(s: string) -> int
+    let n = 0
+    let i = 0
+    let slen = len(s)
+    while i < slen
+        let ch = char_at(s, i)
+        let d = ord(ch) - ord("0")
+        if d < 0 or d > 9
+            throw "invalid numeric value: " + s
+        end
+        n = n * 10 + d
+        i += 1
+    end
+    return n
+end
+
+# Internal algorithm name resolution (case-insensitive, separators ignored).
+function algorithm_from_name_internal(name: string) -> int
+    let upper = ""
+    let i = 0
+    while i < len(name)
+        let ch = char_at(name, i)
+        let c = ord(ch)
+        if c >= 97 and c <= 122
+            ch = chr(c - 32)
+        end
+        if ch != "-" and ch != "_" and ch != " "
+            upper += ch
+        end
+        i += 1
+    end
+    return when upper
+        is "SHA256" => OtpAlgorithm.Sha256
+        is "SHA512" => OtpAlgorithm.Sha512
+        else => OtpAlgorithm.Sha1
+    end
+end
+
+## Builds an `otpauth://` enrollment URI for authenticator provisioning.
+##
+## ### Parameters
+## - `kind`: `"totp"` or `"hotp"`.
+## - `secret`: Base32-encoded shared secret string.
+## - `cfg`: Account configuration (`OtpConfig`).
+## - `counter`: Initial HOTP counter, emitted only for `"hotp"`. Defaults to `0`.
+##
+## ### Returns
+## Enrollment URI string (e.g. `"otpauth://totp/Example:alice?secret=...&issuer=Example&digits=6&period=30&algorithm=SHA1"`).
+##
+## ### Examples
+## ```alya
+## let cfg = make_totp_config("alice", "Example")
+## let uri = build_otpauth_uri("totp", "JBSWY3DPEHPK3PXP", cfg)
+## ```
+pub function build_otpauth_uri(kind: string, secret: string, cfg: OtpConfig, counter: int = 0) -> string
+    if kind != "totp" and kind != "hotp"
+        throw "kind must be totp or hotp"
+    end
+    if secret == "" or secret is null
+        throw "secret must not be empty"
+    end
+    let label = cfg.label
+    if cfg.issuer != ""
+        label = cfg.issuer + ":" + cfg.label
+    end
+    let uri = "otpauth://" + kind + "/" + label + "?secret=" + secret
+    if cfg.issuer != ""
+        uri += "&issuer=" + cfg.issuer
+    end
+    uri += "&digits=" + str(cfg.digits)
+    if kind == "totp"
+        let step = cfg.period
+        if step <= 0
+            step = 30
+        end
+        uri += "&period=" + str(step)
+    else
+        uri += "&counter=" + str(counter)
+    end
+    uri += "&algorithm=" + algorithm_name(cfg.algorithm)
+    return uri
+end
+
+## Parses an `otpauth://` enrollment URI into a plain parameter map.
+##
+## ### Parameters
+## - `uri`: Enrollment URI string starting with `"otpauth://"`.
+##
+## ### Returns
+## Map with `kind`, `label`, `issuer`, `secret`, `digits`, `period`,
+## `counter`, and `algorithm` (an `OtpAlgorithm` selector) keys.
+##
+## ### Examples
+## ```alya
+## let params = parse_otpauth_uri("otpauth://totp/Example:alice?secret=JBSWY3DPEHPK3PXP&issuer=Example")
+## ```
+pub function parse_otpauth_uri(uri: string) -> map
+    let prefix = "otpauth://"
+    if len(uri) < len(prefix) or substring(uri, 0, len(prefix)) != prefix
+        throw "uri must start with otpauth://"
+    end
+    let rest = substring(uri, len(prefix), len(uri) - len(prefix))
+    let q_idx = find_first_internal(rest, "?", 0)
+    let head = rest
+    let query = ""
+    if q_idx != -1
+        head = substring(rest, 0, q_idx)
+        query = substring(rest, q_idx + 1, len(rest) - (q_idx + 1))
+    end
+    let slash = find_first_internal(head, "/", 0)
+    if slash == -1
+        throw "uri must contain a kind segment"
+    end
+    let kind = substring(head, 0, slash)
+    if kind != "totp" and kind != "hotp"
+        throw "kind must be totp or hotp"
+    end
+    let raw_label = substring(head, slash + 1, len(head) - (slash + 1))
+    let issuer = ""
+    let label = raw_label
+    let colon = find_first_internal(raw_label, ":", 0)
+    if colon != -1
+        issuer = substring(raw_label, 0, colon)
+        label = substring(raw_label, colon + 1, len(raw_label) - (colon + 1))
+    end
+
+    let secret = ""
+    let digits = 6
+    let period = 30
+    let counter = 0
+    let algorithm = OtpAlgorithm.Sha1
+    if query != ""
+        let pairs = split(query, "&")
+        for pair in pairs
+            let eq = find_first_internal(pair, "=", 0)
+            if eq != -1
+                let k = substring(pair, 0, eq)
+                let v = substring(pair, eq + 1, len(pair) - (eq + 1))
+                when k
+                    is "secret" then secret = v
+                    is "issuer" then issuer = v
+                    is "digits" then digits = parse_uint_internal(v)
+                    is "period" then period = parse_uint_internal(v)
+                    is "counter" then counter = parse_uint_internal(v)
+                    is "algorithm" then algorithm = algorithm_from_name_internal(v)
+                end
+            end
+        end
+    end
+    if secret == ""
+        throw "uri must contain a secret parameter"
+    end
+    return {
+        "kind": kind,
+        "label": label,
+        "issuer": issuer,
+        "secret": secret,
+        "digits": digits,
+        "period": period,
+        "counter": counter,
+        "algorithm": algorithm
+    }
+end

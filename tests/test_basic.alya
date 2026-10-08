@@ -2,170 +2,234 @@
 ## Part of the Alya Language package ecosystem (https://github.com/alya-lang)
 
 import "std/test"
+import "crypto" as crypto
 import "../src/lib.alya" as pkg
+
+@cfg(feature = "uri")
+function uri_error_path_throws() -> int
+    try
+        pkg::parse_otpauth_uri("https://example.com/x")
+    catch err
+        return true
+    end
+    return false
+end
 
 function main()
     test_suite("otp Test Suite")
     let r = runner_new()
 
     # ═══════════════════════════════════════════════════════════
-    # 1. Facade Greeting & Sanitization
+    # 1. Algorithm Enum & Names
     # ═══════════════════════════════════════════════════════════
-    let res = pkg::hello("Alya")
-    runner_assert_str_eq(r, res, "Hello, Alya!", "pkg::hello returns formatted greeting")
+    runner_assert_eq(r, pkg::OtpAlgorithm.Sha1, 0, "OtpAlgorithm.Sha1 == 0")
+    runner_assert_eq(r, pkg::OtpAlgorithm.Sha256, 1, "OtpAlgorithm.Sha256 == 1")
+    runner_assert_eq(r, pkg::OtpAlgorithm.Sha512, 2, "OtpAlgorithm.Sha512 == 2")
 
-    let default_res = pkg::hello()
-    runner_assert_str_eq(r, default_res, "Hello, World!", "pkg::hello() defaults to World")
-
-    let null_res = pkg::hello(null)
-    runner_assert_str_eq(r, null_res, "Hello, World!", "pkg::hello(null) sanitizes null to World")
-
-    let empty_res = pkg::hello("")
-    runner_assert_str_eq(r, empty_res, "Hello, World!", "pkg::hello(\"\") sanitizes empty string to World")
+    runner_assert_str_eq(r, pkg::algorithm_name(pkg::OtpAlgorithm.Sha1), "SHA1", "algorithm_name Sha1")
+    runner_assert_str_eq(r, pkg::algorithm_name(pkg::OtpAlgorithm.Sha256), "SHA256", "algorithm_name Sha256")
+    runner_assert_str_eq(r, pkg::algorithm_name(pkg::OtpAlgorithm.Sha512), "SHA512", "algorithm_name Sha512")
+    runner_assert_str_eq(r, pkg::algorithm_name(), "SHA1", "algorithm_name defaults to SHA1")
 
     # ═══════════════════════════════════════════════════════════
-    # 2. Enumeration Values
+    # 2. Config Factories & Methods
     # ═══════════════════════════════════════════════════════════
-    runner_assert_eq(r, pkg::OtpStatus.Pending, 0, "OtpStatus.Pending == 0")
-    runner_assert_eq(r, pkg::OtpStatus.Active, 1, "OtpStatus.Active == 1")
-    runner_assert_eq(r, pkg::OtpStatus.Archived, 2, "OtpStatus.Archived == 2")
-    runner_assert_eq(r, pkg::OtpStatus.Error, 3, "OtpStatus.Error == 3")
+    let tcfg = pkg::new_totp_config("alice@example.com", "Example")
+    runner_assert_str_eq(r, tcfg.label, "alice@example.com", "totp cfg label")
+    runner_assert_str_eq(r, tcfg.issuer, "Example", "totp cfg issuer")
+    runner_assert_eq(r, tcfg.digits, 6, "totp cfg digits default 6")
+    runner_assert_eq(r, tcfg.period, 30, "totp cfg period default 30")
+    runner_assert_eq(r, tcfg.algorithm, 0, "totp cfg algorithm default Sha1")
+    runner_assert_eq(r, tcfg.is_valid(), true, "totp cfg is valid")
+    runner_assert_eq(r, tcfg.is_hotp(), false, "totp cfg is not hotp")
+    runner_assert_str_eq(r, tcfg.summary(), "Example:alice@example.com (6 digits, SHA1)", "totp cfg summary")
+    runner_assert_true(r, len(tcfg.describe()) > 0, "totp cfg describe non-empty")
 
-    runner_assert_eq(r, pkg::OtpPriority.Low, 0, "OtpPriority.Low == 0")
-    runner_assert_eq(r, pkg::OtpPriority.Normal, 1, "OtpPriority.Normal == 1")
-    runner_assert_eq(r, pkg::OtpPriority.High, 2, "OtpPriority.High == 2")
-    runner_assert_eq(r, pkg::OtpPriority.Critical, 3, "OtpPriority.Critical == 3")
+    let hcfg = pkg::new_hotp_config("bob", "Example", 8)
+    runner_assert_eq(r, hcfg.digits, 8, "hotp cfg digits 8")
+    runner_assert_eq(r, hcfg.period, 0, "hotp cfg period is 0")
+    runner_assert_eq(r, hcfg.is_hotp(), true, "hotp cfg is hotp")
+    runner_assert_str_eq(r, hcfg.summary(), "Example:bob (8 digits, SHA1)", "hotp cfg summary")
 
-    runner_assert_eq(r, pkg::OtpStyle.Standard, 0, "OtpStyle.Standard == 0")
-    runner_assert_eq(r, pkg::OtpStyle.Formal, 1, "OtpStyle.Formal == 1")
-    runner_assert_eq(r, pkg::OtpStyle.Casual, 2, "OtpStyle.Casual == 2")
+    let d7 = tcfg.with_digits(7)
+    runner_assert_eq(r, d7.digits, 7, "with_digits updates digits")
+    runner_assert_eq(r, tcfg.digits, 6, "original cfg digits immutable")
+    let a2 = tcfg.with_algorithm(pkg::OtpAlgorithm.Sha256)
+    runner_assert_eq(r, a2.algorithm, 1, "with_algorithm updates algorithm")
 
-    # ═══════════════════════════════════════════════════════════
-    # 3. Struct Models & Factory Constructors
-    # ═══════════════════════════════════════════════════════════
-    let cfg = pkg::new_config("Community", 5, pkg::OtpPriority.High, pkg::OtpStyle.Formal)
-    runner_assert_str_eq(r, cfg.name, "Community", "cfg.name is initialized correctly")
-    runner_assert_eq(r, cfg.count, 5, "cfg.count is initialized correctly")
-    runner_assert_eq(r, cfg.priority, 2, "cfg.priority is initialized to High (2)")
-    runner_assert_eq(r, cfg.style, 1, "cfg.style is initialized to Formal (1)")
-    runner_assert_eq(r, cfg.enabled, 1, "cfg.enabled defaults to 1")
-
-    let full_cfg = pkg::make_config("Full", 10, pkg::OtpPriority.Critical, pkg::OtpStyle.Casual, 0, ["tag1", "tag2"])
-    runner_assert_str_eq(r, full_cfg.name, "Full", "full_cfg.name is correct")
-    runner_assert_eq(r, full_cfg.count, 10, "full_cfg.count is correct")
-    runner_assert_eq(r, full_cfg.priority, 3, "full_cfg.priority is Critical (3)")
-    runner_assert_eq(r, full_cfg.enabled, 0, "full_cfg.enabled is 0")
-    runner_assert_eq(r, len(full_cfg.tags), 2, "full_cfg.tags has 2 elements")
+    let bad_cfg = pkg::new_totp_config("alice", "Example")
+    bad_cfg.digits = 5
+    runner_assert_eq(r, bad_cfg.is_valid(), false, "5-digit cfg is invalid")
 
     # ═══════════════════════════════════════════════════════════
-    # 4. Struct Methods & Immutability
+    # 3. Counter Encoding
     # ═══════════════════════════════════════════════════════════
-    let summ = cfg.summary()
-    runner_assert_str_eq(r, summ, "Community (count: 5, active)", "cfg.summary() returns expected formatted summary")
+    let zero = pkg::counter_to_bytes(0)
+    runner_assert_eq(r, len(zero), 8, "counter bytes length 8")
+    runner_assert_eq(r, zero[7], 0, "counter 0 last byte 0")
 
-    let desc = cfg.describe()
-    runner_assert_true(r, len(desc) > 0, "cfg.describe() returns non-empty description")
+    let one = pkg::counter_to_bytes(1)
+    runner_assert_eq(r, one[7], 1, "counter 1 last byte 1")
+    runner_assert_eq(r, one[0], 0, "counter 1 first byte 0")
 
-    runner_assert_eq(r, cfg.is_valid(), true, "cfg.is_valid() returns 1 for valid configuration")
-    runner_assert_eq(r, cfg.is_enabled(), 1, "cfg.is_enabled() returns 1")
-
-    let updated_name_cfg = cfg.with_name("Contributors")
-    runner_assert_str_eq(r, updated_name_cfg.name, "Contributors", "with_name updates name")
-    runner_assert_str_eq(r, cfg.name, "Community", "original cfg.name remains immutable")
-
-    let updated_prio_cfg = cfg.with_priority(pkg::OtpPriority.Critical)
-    runner_assert_eq(r, updated_prio_cfg.priority, 3, "with_priority updates priority")
-    runner_assert_eq(r, cfg.priority, 2, "original cfg.priority remains unchanged")
+    let b256 = pkg::counter_to_bytes(256)
+    runner_assert_eq(r, b256[7], 0, "counter 256 last byte 0")
+    runner_assert_eq(r, b256[6], 1, "counter 256 second byte 1")
 
     # ═══════════════════════════════════════════════════════════
-    # 5. Result Container & Methods
+    # 4. HOTP RFC 4226 Appendix D vectors (SHA1, 6 digits)
+    #    Secret: ASCII "12345678901234567890"
     # ═══════════════════════════════════════════════════════════
-    let ok_res = pkg::ok_result(42, "Computed successfully")
-    runner_assert_eq(r, ok_res.is_ok(), true, "ok_res.is_ok() == 1")
-    runner_assert_eq(r, ok_res.is_error(), false, "ok_res.is_error() == 0")
-    runner_assert_str_eq(r, ok_res.unwrap_or("fallback"), "Computed successfully", "ok_res unwrap_or returns message")
+    let rfc4226_key = crypto::str_to_bytes("12345678901234567890")
+    let hotp_expected = ["755224", "287082", "359152", "969429", "338314", "254676", "287922", "162583", "399871", "520489"]
+    let c = 0
+    while c < 10
+        let code = pkg::hotp_bytes(rfc4226_key, c)
+        runner_assert_str_eq(r, code, hotp_expected[c], "RFC4226 HOTP counter " + str(c))
+        c += 1
+    end
 
-    let err_res = pkg::error_result("Failed operation", ["Invalid input", "Timeout"])
-    runner_assert_eq(r, err_res.is_ok(), false, "err_res.is_ok() == 0")
-    runner_assert_eq(r, err_res.is_error(), true, "err_res.is_error() == 1")
-    runner_assert_str_eq(r, err_res.unwrap_or("fallback"), "fallback", "err_res unwrap_or returns fallback")
-    runner_assert_eq(r, len(err_res.errors), 2, "err_res contains 2 error details")
-
-    # ═══════════════════════════════════════════════════════════
-    # 6. Statistics Container & Methods
-    # ═══════════════════════════════════════════════════════════
-    let stats = pkg::make_stats(20, 18, 2, 0)
-    runner_assert_eq(r, stats.total, 20, "stats.total == 20")
-    runner_assert_eq(r, stats.passed, 18, "stats.passed == 18")
-    runner_assert_eq(r, stats.failed, 2, "stats.failed == 2")
-    runner_assert_eq(r, stats.total_checked(), 20, "stats.total_checked() == 20")
-    runner_assert_str_eq(r, stats.success_rate(), "90%", "stats.success_rate() == 90%")
+    # Same vectors through the Base32 entry point
+    let rfc4226_b32 = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+    runner_assert_str_eq(r, pkg::hotp(rfc4226_b32, 0), "755224", "hotp base32 counter 0")
+    runner_assert_str_eq(r, pkg::hotp(rfc4226_b32, 9), "520489", "hotp base32 counter 9")
+    runner_assert_eq(r, len(pkg::hotp(rfc4226_b32, 3, 8)), 8, "hotp 8-digit length")
 
     # ═══════════════════════════════════════════════════════════
-    # 7. Duck Typing Polymorphism (Interfaces)
+    # 5. TOTP RFC 6238 Appendix B vectors (8 digits, step 30)
     # ═══════════════════════════════════════════════════════════
-    let is_summ = cfg is pkg::Summarizable
-    runner_assert_true(r, is_summ, "cfg satisfies Summarizable interface implicitly")
-    let iface_summ = pkg::format_summary(cfg)
-    runner_assert_str_eq(r, iface_summ, "Community (count: 5, active)", "format_summary dispatches via Summarizable")
+    runner_assert_str_eq(r, pkg::totp_at_bytes(rfc4226_key, 59, 30, 0, 8), "94287082", "RFC6238 SHA1 T=59")
+    runner_assert_str_eq(r, pkg::totp_at_bytes(rfc4226_key, 1111111109, 30, 0, 8), "07081804", "RFC6238 SHA1 T=1111111109")
+    runner_assert_str_eq(r, pkg::totp_at_bytes(rfc4226_key, 1111111111, 30, 0, 8), "14050471", "RFC6238 SHA1 T=1111111111")
+    runner_assert_str_eq(r, pkg::totp_at_bytes(rfc4226_key, 1234567890, 30, 0, 8), "89005924", "RFC6238 SHA1 T=1234567890")
+    runner_assert_str_eq(r, pkg::totp_at_bytes(rfc4226_key, 2000000000, 30, 0, 8), "69279037", "RFC6238 SHA1 T=2000000000")
+    runner_assert_str_eq(r, pkg::totp_at_bytes(rfc4226_key, 20000000000, 30, 0, 8), "65353130", "RFC6238 SHA1 T=20000000000")
 
-    let is_desc = cfg is pkg::Describable
-    runner_assert_true(r, is_desc, "cfg satisfies Describable interface implicitly")
-    let iface_desc = pkg::format_description(cfg)
-    runner_assert_true(r, len(iface_desc) > 0, "format_description dispatches via Describable")
+    let sha256_key = crypto::str_to_bytes("12345678901234567890123456789012")
+    runner_assert_str_eq(r, pkg::totp_at_bytes(sha256_key, 59, 30, 0, 8, pkg::OtpAlgorithm.Sha256), "46119246", "RFC6238 SHA256 T=59")
+    runner_assert_str_eq(r, pkg::totp_at_bytes(sha256_key, 1111111109, 30, 0, 8, pkg::OtpAlgorithm.Sha256), "68084774", "RFC6238 SHA256 T=1111111109")
+    runner_assert_str_eq(r, pkg::totp_at_bytes(sha256_key, 2000000000, 30, 0, 8, pkg::OtpAlgorithm.Sha256), "90698825", "RFC6238 SHA256 T=2000000000")
 
-    # Struct that does not implement Summarizable
-    let is_stats_summ = stats is pkg::Summarizable
-    runner_assert_false(r, is_stats_summ, "stats does not satisfy Summarizable interface")
+    let sha512_key = crypto::str_to_bytes("1234567890123456789012345678901234567890123456789012345678901234")
+    runner_assert_str_eq(r, pkg::totp_at_bytes(sha512_key, 59, 30, 0, 8, pkg::OtpAlgorithm.Sha512), "90693936", "RFC6238 SHA512 T=59")
+    runner_assert_str_eq(r, pkg::totp_at_bytes(sha512_key, 1111111109, 30, 0, 8, pkg::OtpAlgorithm.Sha512), "25091201", "RFC6238 SHA512 T=1111111109")
+    runner_assert_str_eq(r, pkg::totp_at_bytes(sha512_key, 2000000000, 30, 0, 8, pkg::OtpAlgorithm.Sha512), "38618901", "RFC6238 SHA512 T=2000000000")
 
-    # ═══════════════════════════════════════════════════════════
-    # 8. Workflow Processing & Batching
-    # ═══════════════════════════════════════════════════════════
-    let proc_res = pkg::process("Alice", 3, pkg::OtpPriority.High)
-    runner_assert_eq(r, proc_res.is_ok(), 1, "pkg::process returns successful result")
-    runner_assert_str_eq(r, proc_res.message, "OK", "pkg::process message is OK")
-
-    let batch_in = ["Alpha", "Beta", "Gamma"]
-    let batch_out = pkg::process_batch(batch_in)
-    runner_assert_eq(r, len(batch_out), 3, "process_batch returns 3 formatted records")
-
-    let null_batch = pkg::process_batch(null)
-    runner_assert_eq(r, len(null_batch), 0, "process_batch(null) returns empty array")
+    # Base32 entry point matches byte entry point
+    runner_assert_str_eq(r, pkg::totp_at(rfc4226_b32, 59, 30, 0, 8), "94287082", "totp_at base32 T=59")
 
     # ═══════════════════════════════════════════════════════════
-    # 9. Control Flow & Pattern Matching Utilities
+    # 6. Facade Wrappers (config-bound)
     # ═══════════════════════════════════════════════════════════
-    runner_assert_eq(r, pkg::clamp(50, 0, 100), 50, "clamp within bounds")
-    runner_assert_eq(r, pkg::clamp(-10, 0, 100), 0, "clamp lower bound")
-    runner_assert_eq(r, pkg::clamp(150, 0, 100), 100, "clamp upper bound")
-
-    runner_assert_str_eq(r, pkg::pluralize(1, "record", "records"), "record", "pluralize 1 gives singular")
-    runner_assert_str_eq(r, pkg::pluralize(0, "record", "records"), "records", "pluralize 0 gives plural")
-    runner_assert_str_eq(r, pkg::pluralize(5, "record", "records"), "records", "pluralize 5 gives plural")
-
-    let repeated = pkg::repeat_string("item", 3)
-    runner_assert_eq(r, len(repeated), 3, "repeat_string produces 3 elements")
-    runner_assert_str_eq(r, repeated[0], "item", "repeated element matches input")
+    let cfg8 = pkg::new_totp_config("alice", "Example", 8)
+    runner_assert_str_eq(r, pkg::totp_for(cfg8, rfc4226_b32, 59), "94287082", "totp_for config wrapper")
+    runner_assert_eq(r, pkg::verify_totp_for(cfg8, rfc4226_b32, "94287082", 59), 1, "verify_totp_for accepts")
+    runner_assert_eq(r, pkg::verify_totp_for(cfg8, rfc4226_b32, "12345678", 59), 0, "verify_totp_for rejects")
 
     # ═══════════════════════════════════════════════════════════
-    # 10. Destructuring: Tuples & Maps
+    # 7. Verification & Windows
     # ═══════════════════════════════════════════════════════════
-    let (t_prefix, t_count) = ("Custom", 42)
-    runner_assert_str_eq(r, t_prefix, "Custom", "tuple destructuring binds string")
-    runner_assert_eq(r, t_count, 42, "tuple destructuring binds integer")
+    runner_assert_eq(r, pkg::verify_hotp(rfc4226_b32, "755224", 0), 0, "verify_hotp exact counter")
+    runner_assert_eq(r, pkg::verify_hotp(rfc4226_b32, "287082", 0, 3), 1, "verify_hotp window resync")
+    runner_assert_eq(r, pkg::verify_hotp(rfc4226_b32, "000000", 0, 3), -1, "verify_hotp mismatch is -1")
 
-    let pkg_info = { "name": "otp", "version": "0.1.0" }
-    let { name: info_name, version: info_ver } = pkg_info
-    runner_assert_str_eq(r, info_name, "otp", "map destructuring extracts key name")
-    runner_assert_str_eq(r, info_ver, "0.1.0", "map destructuring extracts key version")
+    runner_assert_eq(r, pkg::verify_totp(rfc4226_b32, "94287082", 59, 1, 30, 0, 8), 1, "verify_totp exact step")
+    runner_assert_eq(r, pkg::verify_totp(rfc4226_b32, "94287082", 89, 1, 30, 0, 8), 1, "verify_totp adjacent step window")
+    runner_assert_eq(r, pkg::verify_totp(rfc4226_b32, "94287082", 59, 0, 30, 0, 8), 1, "verify_totp zero window exact")
+    runner_assert_eq(r, pkg::verify_totp(rfc4226_b32, "00000000", 59, 1, 30, 0, 8), 0, "verify_totp mismatch is 0")
+
+    # Live clock roundtrip (generation and verification share the clock)
+    let live = pkg::totp_now(rfc4226_b32)
+    runner_assert_eq(r, len(live), 6, "totp_now 6-digit length")
+    runner_assert_eq(r, pkg::verify_totp_now(rfc4226_b32, live), 1, "verify_totp_now roundtrip")
 
     # ═══════════════════════════════════════════════════════════
-    # 11. Feature-Gated API (`extras`, default-on)
+    # 8. Secret Provisioning
     # ═══════════════════════════════════════════════════════════
-    @cfg(feature = "extras")
-    let extra_res = pkg::extra_greeting("Alya")
-    @cfg(feature = "extras")
-    runner_assert_str_eq(r, extra_res, "Howdy, Alya!", "pkg::extra_greeting returns extras greeting")
+    let fresh = pkg::generate_secret()
+    runner_assert_eq(r, len(fresh), 32, "generate_secret default 32 chars")
+    runner_assert_eq(r, len(crypto::base32_decode_bytes(fresh)), 20, "generate_secret decodes to 20 bytes")
+    let short = pkg::generate_secret(10)
+    runner_assert_eq(r, len(crypto::base32_decode_bytes(short)), 10, "generate_secret(10) decodes to 10 bytes")
+
+    # ═══════════════════════════════════════════════════════════
+    # 9. otpauth URIs (`uri` feature, default-on)
+    # ═══════════════════════════════════════════════════════════
+    @cfg(feature = "uri")
+    let turi = pkg::build_otpauth_uri("totp", rfc4226_b32, tcfg)
+    @cfg(feature = "uri")
+    runner_assert_str_eq(r, turi, "otpauth://totp/Example:alice@example.com?secret=" + rfc4226_b32 + "&issuer=Example&digits=6&period=30&algorithm=SHA1", "build totp uri")
+    @cfg(feature = "uri")
+    let tparams = pkg::parse_otpauth_uri(turi)
+    @cfg(feature = "uri")
+    runner_assert_str_eq(r, tparams["kind"], "totp", "parsed kind")
+    @cfg(feature = "uri")
+    runner_assert_str_eq(r, tparams["label"], "alice@example.com", "parsed label")
+    @cfg(feature = "uri")
+    runner_assert_str_eq(r, tparams["issuer"], "Example", "parsed issuer")
+    @cfg(feature = "uri")
+    runner_assert_str_eq(r, tparams["secret"], rfc4226_b32, "parsed secret")
+    @cfg(feature = "uri")
+    runner_assert_eq(r, tparams["digits"], 6, "parsed digits")
+    @cfg(feature = "uri")
+    runner_assert_eq(r, tparams["period"], 30, "parsed period")
+
+    @cfg(feature = "uri")
+    let huri = pkg::build_otpauth_uri("hotp", rfc4226_b32, hcfg, 7)
+    @cfg(feature = "uri")
+    runner_assert_str_eq(r, huri, "otpauth://hotp/Example:bob?secret=" + rfc4226_b32 + "&issuer=Example&digits=8&counter=7&algorithm=SHA1", "build hotp uri")
+    @cfg(feature = "uri")
+    let hparams = pkg::parse_otpauth_uri(huri)
+    @cfg(feature = "uri")
+    runner_assert_eq(r, hparams["counter"], 7, "parsed counter")
+    @cfg(feature = "uri")
+    runner_assert_eq(r, hparams["algorithm"], pkg::OtpAlgorithm.Sha1, "parsed algorithm")
+
+    # ═══════════════════════════════════════════════════════════
+    # 10. Error Paths
+    # ═══════════════════════════════════════════════════════════
+    let threw = false
+    try
+        pkg::hotp(rfc4226_b32, -1)
+    catch err
+        threw = true
+    end
+    runner_assert_eq(r, threw, true, "negative counter throws")
+
+    threw = false
+    try
+        pkg::hotp("!!!", 0)
+    catch err
+        threw = true
+    end
+    runner_assert_eq(r, threw, true, "empty secret throws")
+
+    threw = false
+    try
+        pkg::hotp(rfc4226_b32, 0, 5)
+    catch err
+        threw = true
+    end
+    runner_assert_eq(r, threw, true, "5 digits throws")
+
+    threw = false
+    try
+        pkg::make_totp_config("alice", "Example", 9)
+    catch err
+        threw = true
+    end
+    runner_assert_eq(r, threw, true, "9-digit config throws")
+
+    threw = false
+    try
+        pkg::totp_at(rfc4226_b32, 10, 0)
+    catch err
+        threw = true
+    end
+    runner_assert_eq(r, threw, true, "zero step throws")
+
+    @cfg(feature = "uri")
+    runner_assert_eq(r, uri_error_path_throws(), true, "non-otpauth uri throws")
 
     let failed = runner_summary(r)
     if failed > 0

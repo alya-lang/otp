@@ -1,262 +1,144 @@
 ## otp Types & Data Structures
 ##
 ## Part of the Alya Language package ecosystem (https://github.com/alya-lang).
-## Defines configuration models, enumerations, structural interfaces, and associated methods
-## showcasing the full range of modern Alya type system capabilities.
-
-# ───────────────────────────────────────────────────────────────
-# Structural Interfaces (Duck Typing)
-# ───────────────────────────────────────────────────────────────
-
-## Public interface for objects capable of producing a formatted string summary.
-##
-## Any struct implementing a `summary(self) -> string` method implicitly
-## satisfies this interface via Alya's structural duck-typing runtime.
-pub interface Summarizable
-    function summary(self) -> string
-end
-
-## Public interface for objects that provide detailed status descriptions and validation.
-##
-## Structs implementing `describe(self) -> string` and `is_valid(self) -> int`
-## satisfy this contract without explicit inheritance declarations.
-pub interface Describable
-    function describe(self) -> string
-    function is_valid(self) -> int
-end
+## Defines one-time password configuration models, hash algorithm selection,
+## and associated constructors and methods (RFC 4226 HOTP, RFC 6238 TOTP).
 
 # ───────────────────────────────────────────────────────────────
 # Enumerations
 # ───────────────────────────────────────────────────────────────
 
-## Public enumeration of entity lifecycle status states.
+## Hash algorithms available for HMAC-based one-time passwords.
 ##
-## Defines sequential status codes from pending to completed or error states.
-pub enum OtpStatus
-    Pending = 0,
-    Active = 1,
-    Archived = 2,
-    Error = 3
-end
-
-## Public enumeration of operational priority levels.
-##
-## Used to determine dispatch scheduling, queue ordering, and urgency tiers.
-pub enum OtpPriority
-    Low = 0,
-    Normal = 1,
-    High = 2,
-    Critical = 3
-end
-
-## Public enumeration of greeting and presentation styles.
-##
-## Governs formatting salutations, prefixes, and stylistic tone.
-pub enum OtpStyle
-    Standard = 0,
-    Formal = 1,
-    Casual = 2
+## `Sha1` is mandatory for HOTP (RFC 4226) and the interoperable default for
+## TOTP; `Sha256` and `Sha512` are the RFC 6238 TOTP extensions.
+pub enum OtpAlgorithm
+    Sha1 = 0,
+    Sha256 = 1,
+    Sha512 = 2
 end
 
 # ───────────────────────────────────────────────────────────────
 # Data Models (Structs)
 # ───────────────────────────────────────────────────────────────
 
-## Configuration data model holding execution parameters and metadata.
+## One-time password account configuration shared by HOTP and TOTP.
 ##
-## Encapsulates target identity, counter thresholds, priority tier, stylistic
-## mode, active status flag, and associated classification tags.
+## Holds the human-facing account identity (`issuer`, `label`) plus the
+## code parameters (`digits`, `period`, `algorithm`). The secret itself is
+## intentionally kept out of this struct and passed separately to the
+## generator functions. `period` is `0` for HOTP accounts (counter-based,
+## no time step).
 ##
 ## ### Fields
-## - `name`: Validated entity identifier string.
-## - `count`: Repetition limit or processing counter.
-## - `priority`: Operational priority level (`OtpPriority` enum value).
-## - `style`: Presentation style variant (`OtpStyle` enum value).
-## - `enabled`: Activation flag (1 for active, 0 for inactive).
-## - `tags`: Categorical metadata tags array.
+## - `issuer`: Provider or service name (e.g. `"Example"`).
+## - `label`: Account name (e.g. `"alice@example.com"`).
+## - `digits`: Code length, 6, 7, or 8.
+## - `period`: TOTP time step in seconds (`0` for HOTP).
+## - `algorithm`: Hash selector from `OtpAlgorithm`.
 pub struct OtpConfig
-    name: string,
-    count: int,
-    priority: int,
-    style: int,
-    enabled: int,
-    tags: array
-end
-
-## Container representing the outcome of an operation.
-##
-## Holds an optional payload value, numeric status code, informational message,
-## and accumulated error diagnostic messages.
-##
-## ### Fields
-## - `value`: Result payload (any type, or null on failure).
-## - `status`: Outcome code (0 for success, non-zero for errors).
-## - `message`: Human-readable summary or error explanation.
-## - `errors`: Diagnostic error messages array.
-pub struct OtpResult
-    value,
-    status: int,
-    message: string,
-    errors: array
-end
-
-## Aggregated run statistics tracking test, processing, or batch metrics.
-##
-## Records total observed items, successes, failures, and skipped items.
-##
-## ### Fields
-## - `total`: Total processed items count.
-## - `passed`: Succeeded items count.
-## - `failed`: Failed items count.
-## - `skipped`: Skipped items count.
-pub struct OtpStats
-    total: int,
-    passed: int,
-    failed: int,
-    skipped: int
+    issuer: string,
+    label: string,
+    digits: int,
+    period: int,
+    algorithm: int
 end
 
 # ───────────────────────────────────────────────────────────────
 # Private Helper Functions
 # ───────────────────────────────────────────────────────────────
 
-# Internal sanitizer ensuring a non-empty, non-null string fallback.
-function sanitize_text_internal(text, fallback: string) -> string
-    return when
-        text is null => fallback
-        text == ""   => fallback
-        else         => text
+# Internal guard shared by the factory constructors.
+function digits_valid_internal(digits: int) -> int
+    if digits == 6 or digits == 7 or digits == 8
+        return true
     end
-end
-
-# Formats integer division as a percentage string, clamping denominator zero.
-function format_percent_internal(passed: int, total: int) -> string
-    if total <= 0
-        return "0%"
-    end
-    let pct = (passed * 100) / total
-    return "{pct}%"
+    return false
 end
 
 # ───────────────────────────────────────────────────────────────
-# Public Sanitization and Factory Constructors
+# Public Factories and Helpers
 # ───────────────────────────────────────────────────────────────
 
-## Validates and sanitizes a candidate name string.
-##
-## Replaces null or empty strings with the default `"World"` fallback.
+## Returns the canonical uppercase digest name for an `OtpAlgorithm` value.
 ##
 ## ### Parameters
-## - `name`: The candidate name value to sanitize.
+## - `algorithm`: Selector from `OtpAlgorithm`.
 ##
 ## ### Returns
-## The validated string value, or `"World"` if empty or null.
+## `"SHA1"`, `"SHA256"`, or `"SHA512"` (defaults to `"SHA1"`).
 ##
 ## ### Examples
 ## ```alya
-## let clean = sanitize_name(null) # "World"
-## let user = sanitize_name("Alice") # "Alice"
+## let name = algorithm_name(OtpAlgorithm.Sha256) # "SHA256"
 ## ```
-pub function sanitize_name(name) -> string
-    return sanitize_text_internal(name, "World")
+pub function algorithm_name(algorithm: int = OtpAlgorithm.Sha1) -> string
+    return when algorithm
+        is OtpAlgorithm.Sha256 => "SHA256"
+        is OtpAlgorithm.Sha512 => "SHA512"
+        else => "SHA1"
+    end
 end
 
-## Factory constructor creating a validated `OtpConfig` instance.
-##
-## Sanitizes the input name and sets sensible defaults for optional fields.
+## Factory constructor creating a validated TOTP account configuration.
 ##
 ## ### Parameters
-## - `name`: Entity identifier name. Defaults to `"World"`.
-## - `count`: Counter or repetition limit. Defaults to `1`.
-## - `priority`: Priority tier. Defaults to `OtpPriority.Normal`.
-## - `style`: Presentation style variant. Defaults to `OtpStyle.Standard`.
-## - `enabled`: Active flag. Defaults to `1`.
-## - `tags`: Categorization tags array. Defaults to `[]`.
+## - `label`: Account name. Defaults to `"user"`.
+## - `issuer`: Provider or service name. Defaults to `""`.
+## - `digits`: Code length (6, 7, or 8). Defaults to `6`.
+## - `period`: Time step in seconds. Defaults to `30`.
+## - `algorithm`: Hash selector from `OtpAlgorithm`. Defaults to `OtpAlgorithm.Sha1`.
 ##
 ## ### Returns
 ## A fully initialized `OtpConfig` instance.
 ##
 ## ### Examples
 ## ```alya
-## let cfg = make_config("Alice", 3, OtpPriority.High)
+## let cfg = make_totp_config("alice@example.com", "Example")
 ## ```
-pub function make_config(name = "World", count: int = 1, priority: int = OtpPriority.Normal, style: int = OtpStyle.Standard, enabled: int = 1, tags: array = []) -> OtpConfig
-    let valid_name = sanitize_name(name)
+pub function make_totp_config(label = "user", issuer: string = "", digits: int = 6, period: int = 30, algorithm: int = OtpAlgorithm.Sha1) -> OtpConfig
+    if digits_valid_internal(digits) == false
+        throw "digits must be 6, 7, or 8"
+    end
+    if period <= 0
+        throw "period must be positive"
+    end
     return OtpConfig {
-        name: valid_name,
-        count: count,
-        priority: priority,
-        style: style,
-        enabled: enabled,
-        tags: tags
+        issuer: issuer,
+        label: label,
+        digits: digits,
+        period: period,
+        algorithm: algorithm
     }
 end
 
-## Factory constructor creating a successful `OtpResult`.
+## Factory constructor creating a validated HOTP account configuration.
+##
+## HOTP is counter-based, so `period` is fixed to `0` (not applicable).
 ##
 ## ### Parameters
-## - `value`: The success payload to encapsulate.
-## - `message`: Descriptive success message string. Defaults to `"OK"`.
+## - `label`: Account name. Defaults to `"user"`.
+## - `issuer`: Provider or service name. Defaults to `""`.
+## - `digits`: Code length (6, 7, or 8). Defaults to `6`.
+## - `algorithm`: Hash selector from `OtpAlgorithm`. Defaults to `OtpAlgorithm.Sha1`.
 ##
 ## ### Returns
-## A `OtpResult` with status `0` and empty errors array.
+## A fully initialized `OtpConfig` instance with `period` set to `0`.
 ##
 ## ### Examples
 ## ```alya
-## let res = ok_result("Processed data", "Success")
+## let cfg = make_hotp_config("alice@example.com", "Example")
 ## ```
-pub function ok_result(value, message: string = "OK") -> OtpResult
-    return OtpResult {
-        value: value,
-        status: 0,
-        message: message,
-        errors: []
-    }
-end
-
-## Factory constructor creating a failed `OtpResult`.
-##
-## ### Parameters
-## - `message`: Descriptive error message string.
-## - `errors`: Diagnostic error details array. Defaults to `[]`.
-##
-## ### Returns
-## A `OtpResult` with status `1` and null value payload.
-##
-## ### Examples
-## ```alya
-## let err = error_result("Validation failed", ["Name is missing"])
-## ```
-pub function error_result(message: string, errors: array = []) -> OtpResult
-    return OtpResult {
-        value: null,
-        status: 1,
-        message: message,
-        errors: errors
-    }
-end
-
-## Factory constructor creating a `OtpStats` metric record.
-##
-## ### Parameters
-## - `total`: Total observed items count.
-## - `passed`: Succeeded items count.
-## - `failed`: Failed items count.
-## - `skipped`: Skipped items count. Defaults to `0`.
-##
-## ### Returns
-## A populated `OtpStats` record.
-##
-## ### Examples
-## ```alya
-## let stats = make_stats(100, 95, 5, 0)
-## ```
-pub function make_stats(total: int, passed: int, failed: int, skipped: int = 0) -> OtpStats
-    return OtpStats {
-        total: total,
-        passed: passed,
-        failed: failed,
-        skipped: skipped
+pub function make_hotp_config(label = "user", issuer: string = "", digits: int = 6, algorithm: int = OtpAlgorithm.Sha1) -> OtpConfig
+    if digits_valid_internal(digits) == false
+        throw "digits must be 6, 7, or 8"
+    end
+    return OtpConfig {
+        issuer: issuer,
+        label: label,
+        digits: digits,
+        period: 0,
+        algorithm: algorithm
     }
 end
 
@@ -264,171 +146,101 @@ end
 # Struct Methods: OtpConfig
 # ───────────────────────────────────────────────────────────────
 
-## Returns a formatted single-line string summary of this configuration.
-##
-## Implicitly satisfies the `Summarizable` interface.
+## Returns a formatted single-line summary of this configuration.
 ##
 ## ### Parameters
 ## - `self`: The target `OtpConfig` instance.
 ##
 ## ### Returns
-## Formatted summary string in the form `"{name} (count: {count}, enabled: {enabled})"`.
+## Summary string in the form `"Example:alice@example.com (6 digits, SHA1)"`.
 pub function OtpConfig.summary(self: OtpConfig) -> string
-    let active_str = when self.enabled
-        is true => "active"
-        else => "disabled"
+    let who = self.label
+    if self.issuer != ""
+        who = self.issuer + ":" + self.label
     end
-    return "{self.name} (count: {self.count}, {active_str})"
+    return "{who} ({self.digits} digits, {algorithm_name(self.algorithm)})"
 end
 
 ## Returns a detailed multi-attribute description of this configuration.
 ##
-## Implicitly satisfies the `Describable` interface.
-##
 ## ### Parameters
 ## - `self`: The target `OtpConfig` instance.
 ##
 ## ### Returns
-## Detailed descriptive string including priority and style codes.
+## Detailed descriptive string including period and algorithm code.
 pub function OtpConfig.describe(self: OtpConfig) -> string
-    return "[Config] name={self.name}, count={self.count}, priority={self.priority}, style={self.style}"
+    return "[OtpConfig] issuer={self.issuer}, label={self.label}, digits={self.digits}, period={self.period}, algorithm={self.algorithm}"
 end
 
-## Validates whether this configuration conforms to essential operational constraints.
-##
-## Implicitly satisfies the `Describable` interface.
+## Validates whether this configuration conforms to OTP constraints.
 ##
 ## ### Parameters
 ## - `self`: The target `OtpConfig` instance.
 ##
 ## ### Returns
-## `1` if valid (non-empty name and count >= 0), `0` otherwise.
+## `1` if valid (non-empty label, digits 6-8, non-negative period), `0` otherwise.
 pub function OtpConfig.is_valid(self: OtpConfig) -> int
-    if self.name == "" or self.count < 0
+    if self.label == "" or self.label is null
+        return false
+    end
+    if digits_valid_internal(self.digits) == false
+        return false
+    end
+    if self.period < 0
         return false
     end
     return true
 end
 
-## Returns 1 if this configuration is enabled, 0 otherwise.
+## Returns 1 if this configuration is counter-based (HOTP), 0 otherwise.
 ##
 ## ### Parameters
 ## - `self`: The target `OtpConfig` instance.
 ##
 ## ### Returns
-## `1` when enabled, `0` when disabled.
-pub function OtpConfig.is_enabled(self: OtpConfig) -> int
-    return self.enabled
-end
-
-## Returns a new configuration copy with an updated name.
-##
-## ### Parameters
-## - `self`: The current `OtpConfig` instance.
-## - `new_name`: The replacement name string.
-##
-## ### Returns
-## A new `OtpConfig` instance with updated name.
-pub function OtpConfig.with_name(self: OtpConfig, new_name) -> OtpConfig
-    return OtpConfig {
-        name: sanitize_name(new_name),
-        count: self.count,
-        priority: self.priority,
-        style: self.style,
-        enabled: self.enabled,
-        tags: self.tags
-    }
-end
-
-## Returns a new configuration copy with an updated priority level.
-##
-## ### Parameters
-## - `self`: The current `OtpConfig` instance.
-## - `new_priority`: New priority level from `OtpPriority`.
-##
-## ### Returns
-## A new `OtpConfig` instance with updated priority.
-pub function OtpConfig.with_priority(self: OtpConfig, new_priority: int) -> OtpConfig
-    return OtpConfig {
-        name: self.name,
-        count: self.count,
-        priority: new_priority,
-        style: self.style,
-        enabled: self.enabled,
-        tags: self.tags
-    }
-end
-
-# ───────────────────────────────────────────────────────────────
-# Struct Methods: OtpResult
-# ───────────────────────────────────────────────────────────────
-
-## Returns 1 if this result represents a successful operation.
-##
-## ### Parameters
-## - `self`: The target `OtpResult` instance.
-##
-## ### Returns
-## `1` when status is `0`, `0` otherwise.
-pub function OtpResult.is_ok(self: OtpResult) -> int
-    if self.status == 0
+## `1` when `period` is `0`, `0` otherwise.
+pub function OtpConfig.is_hotp(self: OtpConfig) -> int
+    if self.period == 0
         return true
     end
     return false
 end
 
-## Returns 1 if this result represents an error condition.
+## Returns a new configuration copy with an updated digit length.
 ##
 ## ### Parameters
-## - `self`: The target `OtpResult` instance.
+## - `self`: The current `OtpConfig` instance.
+## - `new_digits`: Replacement code length (6, 7, or 8).
 ##
 ## ### Returns
-## `1` when status is non-zero, `0` when status is `0`.
-pub function OtpResult.is_error(self: OtpResult) -> int
-    if self.status != 0
-        return true
+## A new `OtpConfig` instance with updated digits.
+pub function OtpConfig.with_digits(self: OtpConfig, new_digits: int) -> OtpConfig
+    if digits_valid_internal(new_digits) == false
+        throw "digits must be 6, 7, or 8"
     end
-    return false
+    return OtpConfig {
+        issuer: self.issuer,
+        label: self.label,
+        digits: new_digits,
+        period: self.period,
+        algorithm: self.algorithm
+    }
 end
 
-## Unwraps the result's message string, or returns a fallback string on error.
+## Returns a new configuration copy with an updated hash algorithm.
 ##
 ## ### Parameters
-## - `self`: The target `OtpResult` instance.
-## - `fallback`: Alternative string returned if this result represents an error.
+## - `self`: The current `OtpConfig` instance.
+## - `new_algorithm`: Replacement selector from `OtpAlgorithm`.
 ##
 ## ### Returns
-## `message` on success, or `fallback` on error.
-pub function OtpResult.unwrap_or(self: OtpResult, fallback: string) -> string
-    if self.status == 0
-        return self.message
-    end
-    return fallback
-end
-
-# ───────────────────────────────────────────────────────────────
-# Struct Methods: OtpStats
-# ───────────────────────────────────────────────────────────────
-
-## Returns the total number of checked items (passed + failed).
-##
-## ### Parameters
-## - `self`: The target `OtpStats` instance.
-##
-## ### Returns
-## Integer sum of passed and failed items.
-pub function OtpStats.total_checked(self: OtpStats) -> int
-    return self.passed + self.failed
-end
-
-## Computes and returns the success rate percentage as a formatted string.
-##
-## ### Parameters
-## - `self`: The target `OtpStats` instance.
-##
-## ### Returns
-## Formatted percentage string (e.g. `"90%"`).
-pub function OtpStats.success_rate(self: OtpStats) -> string
-    let checked = self.passed + self.failed
-    return format_percent_internal(self.passed, checked)
+## A new `OtpConfig` instance with updated algorithm.
+pub function OtpConfig.with_algorithm(self: OtpConfig, new_algorithm: int) -> OtpConfig
+    return OtpConfig {
+        issuer: self.issuer,
+        label: self.label,
+        digits: self.digits,
+        period: self.period,
+        algorithm: new_algorithm
+    }
 end

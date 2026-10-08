@@ -6,72 +6,53 @@ import "../src/lib.alya" as pkg
 
 function main()
     let runner = bench_runner("otp Micro-Benchmarks")
+    let secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
 
-    # Bench 1: hello() facade function — 100k iterations
-    bench_start(runner, 100000)
+    # Bench 1: hotp() generation — 500 iterations (pure-Alya HMAC-SHA1)
+    bench_start(runner, 500)
     let i = 0
-    while i < 100000
-        pkg::hello("Alya")
+    while i < 500
+        pkg::hotp(secret, i)
         i += 1
     end
-    bench_stop(runner, "hello() 100k calls")
+    bench_stop(runner, "hotp() 500 calls")
 
-    # Bench 2: process() default call — 100k iterations
-    bench_start(runner, 100000)
+    # Bench 2: totp_at() fixed timestamp — 500 iterations
+    bench_start(runner, 500)
     let j = 0
-    while j < 100000
-        pkg::process()
+    while j < 500
+        pkg::totp_at(secret, 59, 30, 0, 8)
         j += 1
     end
-    bench_stop(runner, "process() default 100k calls")
+    bench_stop(runner, "totp_at() 8-digit 500 calls")
 
-    # Bench 3: make_config + format_config — 50k iterations
-    bench_start(runner, 50000)
+    # Bench 3: verify_hotp() exact counter — 500 iterations
+    bench_start(runner, 500)
     let k = 0
-    while k < 50000
-        let cfg = pkg::new_config("bench", 1, pkg::OtpPriority.High, pkg::OtpStyle.Formal)
-        pkg::core_format_custom(cfg)
+    while k < 500
+        pkg::verify_hotp(secret, "755224", 0)
         k += 1
     end
-    bench_stop(runner, "new_config + format_custom 50k calls")
+    bench_stop(runner, "verify_hotp() 500 calls")
 
-    # Bench 4: process_batch with 10-element array — 10k iterations
-    let labels = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]
-    bench_start(runner, 10000)
+    # Bench 4: counter_to_bytes() encoding — 50k iterations
+    bench_start(runner, 50000)
     let m = 0
-    while m < 10000
-        pkg::process_batch(labels)
+    while m < 50000
+        pkg::counter_to_bytes(m)
         m += 1
     end
-    bench_stop(runner, "process_batch 10-item list 10k calls")
+    bench_stop(runner, "counter_to_bytes() 50k calls")
 
-    # Bench 5: struct method cfg.summary() — 200k iterations
-    let summ_cfg = pkg::new_config("summary-bench", 5)
-    bench_start(runner, 200000)
+    # Bench 5: config summary formatting — 50k iterations
+    let cfg = pkg::new_totp_config("alice@example.com", "Example")
+    bench_start(runner, 50000)
     let s = 0
-    while s < 200000
-        summ_cfg.summary()
+    while s < 50000
+        cfg.summary()
         s += 1
     end
-    bench_stop(runner, "cfg.summary() 200k calls")
-
-    # Bench 6: clamp() utility — 500k iterations
-    bench_start(runner, 500000)
-    let c = 0
-    while c < 500000
-        pkg::clamp(c, 0, 100)
-        c += 1
-    end
-    bench_stop(runner, "clamp() utility 500k calls")
-
-    # Bench 7: repeat_string() utility — 10k iterations
-    bench_start(runner, 10000)
-    let r = 0
-    while r < 10000
-        pkg::repeat_string("bench", 10)
-        r += 1
-    end
-    bench_stop(runner, "repeat_string() 10k calls")
+    bench_stop(runner, "cfg.summary() 50k calls")
 
     bench_summary(runner)
 end

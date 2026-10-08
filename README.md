@@ -11,15 +11,14 @@ RFC 4226 HOTP and RFC 6238 TOTP one-time password toolkit for Alya backed by aly
 
 ## 🌟 Features
 
-- ⚡ **Lightweight & High Performance**: Minimal memory overhead, zero runtime bloat, and fast native execution
-- 🧩 **Modular Architecture**: Layered multi-module design featuring a clean public facade (`src/lib.alya`), rich data models (`src/types.alya`), and encapsulated core formatters (`src/core/formatter.alya`)
-- 🔒 **Public/Private Visibility (`pub`)**: Fine-grained export control with `pub` for public functions, structs, and enums, keeping internal helper functions private and encapsulated
-- 🎭 **Structural Duck Typing & Interfaces**: Dynamic interface dispatch (`Summarizable`, `Describable`) without brittle inheritance hierarchies
-- 📦 **Rich Domain Models & Enums**: Idiomatic `enum` types (`OtpStatus`, `OtpPriority`, `OtpStyle`) and typed data containers (`OtpConfig`, `OtpResult`, `OtpStats`)
-- 🎯 **Advanced Pattern Matching**: Clean branching with `when` expressions, range matching, and condition guards
-- 🛡️ **Defensive Result Pattern**: Structured error handling and outcome encapsulation with `ok_result` and `error_result`
-- 🧪 **Enterprise Test & Benchmark Suite**: 100% test coverage with standard assertions (`std/test`) and micro-benchmarking (`std/test` bench runner)
-- 🚩 **Feature-Gated API Slices**: Optional capability slices via `[features]` in `alya.toml` (`default = ["extras"]`) and `@cfg(feature = "extras")` gating with a `@cfg(not(feature = "extras"))` fallback stub (see `src/core/extras.alya`)
+- 🔑 **RFC 4226 HOTP**: Counter-based one-time passwords with 8-byte big-endian encoding and dynamic truncation
+- ⏱️ **RFC 6238 TOTP**: Time-based codes over HOTP with configurable step, epoch offset, and live-clock generation via `time()`
+- 🧮 **Multi-Algorithm HMAC**: SHA-1 (interoperable default) plus SHA-256 and SHA-512 TOTP extensions, dispatched through `OtpAlgorithm`
+- ✅ **Constant-Time Verification**: HOTP resync windows returning the matched counter, TOTP look-around windows, all comparisons via `crypto::constant_time_eq`
+- 🎲 **Secret Provisioning**: Fresh random secrets from `crypto::random_bytes`, emitted as unpadded Base32 for authenticator enrollment
+- 🔗 **otpauth Enrollment URIs**: Authenticator QR-code flows with `build_otpauth_uri` / `parse_otpauth_uri` (default-on `uri` feature slice)
+- 🧪 **RFC Test Vectors**: Full Appendix D (HOTP) and Appendix B (TOTP SHA-1/256/512) conformance coverage in `tests/test_basic.alya`
+- 📦 **Zero Native Code**: Pure Alya on top of `alya-lang/crypto` — no C toolchain beyond the standard compiler pipeline
 
 ---
 
@@ -31,25 +30,24 @@ otp/
 ├── .editorconfig           # Uniform formatting rules across IDEs and editors
 ├── .gitignore              # Ecosystem standard ignore filters
 ├── .vscode/                # VS Code workspace settings, DAP launch configurations & tasks
-├── alya.toml               # Package manifest with dependencies, [features] and optional [build]
-├── c/                      # (Optional) Native C sources for zero-dependency FFI packages
+├── alya.toml               # Package manifest with crypto dependency and [features]
 ├── src/
-│   ├── lib.alya            # Public API facade (pub exports, re-exports & pipeline runners)
-│   ├── types.alya          # Data models, pub enums, pub structs, and struct methods
-│   ├── ffi.alya            # (Optional) Native extern "C" declarations
+│   ├── lib.alya            # Public API facade (pub exports, config-bound wrappers, uri stubs)
+│   ├── types.alya          # Data models: OtpAlgorithm enum, OtpConfig struct, factories, methods
 │   └── core/               # Subdirectory module hierarchy
-│       ├── formatter.alya  # Domain formatting routines, salutation builders & pattern matchers
-│       └── extras.alya     # Feature-gated (`extras`) optional API slice with `@cfg` gating
+│       ├── hotp.alya       # HOTP generation: counter encoding, digest dispatch, truncation
+│       ├── totp.alya       # TOTP generation, verify_hotp/verify_totp, generate_secret
+│       └── uri.alya        # Feature-gated (`uri`) otpauth enrollment URI builder & parser
 ├── examples/
 │   └── demo.alya           # Comprehensive runnable walkthrough of all package capabilities
 ├── tests/
-│   └── test_basic.alya     # Automated test suite with 100% feature coverage
+│   └── test_basic.alya     # Automated test suite with RFC vector conformance coverage
 └── benches/
-    └── bench_basic.alya    # Micro-benchmarks measuring performance and throughput
+    └── bench_basic.alya    # Micro-benchmarks measuring generation and verification throughput
 ```
 
 > [!NOTE]
-> **Visibility & Modularity:** Symbols annotated with `pub` (`pub function`, `pub struct`, `pub enum`, `pub interface`) are exported to external consumers and re-exporting modules. Symbols without `pub` remain strictly internal to their declaring module, preventing symbol collisions and implementation leakage.
+> **Visibility & Modularity:** Symbols annotated with `pub` (`pub function`, `pub struct`, `pub enum`) are exported to external consumers and re-exporting modules. Symbols without `pub` remain strictly internal to their declaring module, preventing symbol collisions and implementation leakage.
 
 ---
 
@@ -74,21 +72,28 @@ alya install
 ## 🚀 Quick Start
 
 ```alya
-import "otp" as pkg
+import "otp" as otp
 
 function main()
-    # 1. Basic facade call with default parameter
-    let greeting = pkg::hello()
-    say f"Greeting:  {greeting}"
+    let secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
 
-    # 2. Struct configuration with priority, style, and methods
-    let cfg = pkg::new_config("Community", 5, pkg::OtpPriority.High, pkg::OtpStyle.Formal)
-    say f"Summary:   {cfg.summary()}"
-    say f"Formatted: {pkg::core_format_custom(cfg)}"
+    # 1. Counter-based code (RFC 4226)
+    let hotp_code = otp::hotp(secret, 0)
+    say f"HOTP: {hotp_code}" # "755224"
 
-    # 3. Processing pipeline returning Result model
-    let res = pkg::process("Analytics", 3, pkg::OtpPriority.Critical)
-    say f"Outcome:   {res.message}"
+    # 2. Time-based code for the current moment
+    let totp_code = otp::totp_now(secret)
+    say f"TOTP: {totp_code}"
+
+    # 3. Verify a user-supplied code with a look-around window
+    if otp::verify_totp_now(secret, totp_code)
+        say "Accepted"
+    end
+
+    # 4. Config-bound facade with enrollment URI
+    let cfg = otp::new_totp_config("alice@example.com", "Example")
+    say f"Config: {cfg.summary()}"
+    say otp::build_otpauth_uri("totp", secret, cfg)
 end
 
 main()
@@ -100,45 +105,37 @@ main()
 
 | Symbol | Visibility | Description |
 |---|---|---|
-| `hello(name = "World")` | `pub function` | Returns a formatted greeting string. Defaults to `"World"` if null or empty. |
-| `new_config(name, count, priority, style)` | `pub function` | Factory constructing a `OtpConfig` with sensible defaults. |
-| `make_config(name, count, priority, style, enabled, tags)` | `pub function` | Full constructor for `OtpConfig`. |
-| `process(label, count, priority)` | `pub function` | Runs processing pipeline, returning an `ok_result` `OtpResult`. |
-| `process_batch(labels)` | `pub function` | Formats an array of labels in batch, returning an array of strings. |
-| `ok_result(value, message)` | `pub function` | Constructs a successful `OtpResult` container (`status = 0`). |
-| `error_result(message, errors)` | `pub function` | Constructs a failed `OtpResult` container (`status = 1`). |
-| `make_stats(total, passed, failed, skipped)` | `pub function` | Constructs a `OtpStats` metrics record. |
-| `format_summary(cfg)` | `pub function` | Formats summary of a config instance (satisfies `Summarizable`). |
-| `format_description(cfg)` | `pub function` | Formats description of a config instance (satisfies `Describable`). |
-| `format_config(config)` | `pub function` | Multi-field formatter producing descriptive overview of a `OtpConfig`. |
-| `format_result(result)` | `pub function` | Formats a `OtpResult` into `[OK]` or `[ERROR]` status line. |
-| `format_stats(stats)` | `pub function` | Formats total checked items and success rate percentage. |
-| `clamp(n, min_val, max_val)` | `pub function` | Clamps an integer value to the closed range `[min_val, max_val]`. |
-| `pluralize(n, singular, plural)` | `pub function` | Pattern-matches count to return singular or plural noun form. |
-| `repeat_string(label, count)` | `pub function` | Repeats a string into an array of `count` items. |
-| `extra_greeting(name = "World")` | `pub function` (`extras` feature, default-on) | Enthusiastic greeting slice gated by `@cfg(feature = "extras")`; stub throws a descriptive error when the feature is off. |
-| `Summarizable` | `pub interface` | Structural contract requiring `summary(self) -> string`. |
-| `Describable` | `pub interface` | Structural contract requiring `describe(self) -> string` and `is_valid(self) -> int`. |
-| `OtpStatus` | `pub enum` | Lifecycle status codes (`Pending = 0`, `Active = 1`, `Archived = 2`, `Error = 3`). |
-| `OtpPriority` | `pub enum` | Priority tiers (`Low = 0`, `Normal = 1`, `High = 2`, `Critical = 3`). |
-| `OtpStyle` | `pub enum` | Presentation styles (`Standard = 0`, `Formal = 1`, `Casual = 2`). |
-| `OtpConfig` | `pub struct` | Primary configuration model (`name`, `count`, `priority`, `style`, `enabled`, `tags`). |
-| `OtpConfig.summary()` | `pub method` | Single-line formatted summary (satisfies `Summarizable`). |
-| `OtpConfig.describe()` | `pub method` | Detailed multi-field description (satisfies `Describable`). |
-| `OtpConfig.is_valid()` | `pub method` | Validation guard returning 1 if valid, 0 otherwise. |
-| `OtpConfig.is_enabled()` | `pub method` | Returns 1 if active, 0 if disabled. |
-| `OtpConfig.with_name(new_name)` | `pub method` | Immutable copy with updated name. |
-| `OtpConfig.with_priority(new_prio)` | `pub method` | Immutable copy with updated priority tier. |
-| `OtpResult` | `pub struct` | Operation outcome model (`value`, `status`, `message`, `errors`). |
-| `OtpResult.is_ok()` | `pub method` | Returns 1 if successful (`status == 0`), 0 otherwise. |
-| `OtpResult.is_error()` | `pub method` | Returns 1 if error (`status != 0`), 0 otherwise. |
-| `OtpResult.unwrap_or(fallback)` | `pub method` | Returns message on success, or fallback on error. |
-| `OtpStats` | `pub struct` | Run statistics model (`total`, `passed`, `failed`, `skipped`). |
-| `OtpStats.total_checked()` | `pub method` | Sum of passed and failed items count. |
-| `OtpStats.success_rate()` | `pub method` | Computed percentage string (e.g. `"95%"`). |
+| `hotp(secret, counter, digits, algorithm)` | `pub function` | Generates an HOTP code from a Base32 secret. Defaults: `digits = 6`, `OtpAlgorithm.Sha1`. |
+| `hotp_bytes(secret_bytes, counter, digits, algorithm)` | `pub function` | Generates an HOTP code from raw secret bytes. |
+| `totp_at(secret, timestamp, step, t0, digits, algorithm)` | `pub function` | Generates a TOTP code at an explicit Unix timestamp. Defaults: `step = 30`, `t0 = 0`. |
+| `totp_at_bytes(secret_bytes, timestamp, step, t0, digits, algorithm)` | `pub function` | Generates a TOTP code from raw secret bytes at an explicit timestamp. |
+| `totp_now(secret, step, t0, digits, algorithm)` | `pub function` | Generates a TOTP code for the current system time. |
+| `verify_hotp(secret, code, counter, window, digits, algorithm)` | `pub function` | Verifies an HOTP code over a resync window; returns the matched counter or `-1`. |
+| `verify_totp(secret, code, timestamp, window, step, t0, digits, algorithm)` | `pub function` (`-> bool`) | Verifies a TOTP code with a look-around window at an explicit timestamp. |
+| `verify_totp_now(secret, code, window, step, t0, digits, algorithm)` | `pub function` (`-> bool`) | Verifies a TOTP code against the current time. |
+| `generate_secret(length)` | `pub function` | Generates a fresh random secret as unpadded Base32. Defaults to `20` bytes. |
+| `counter_to_bytes(counter)` | `pub function` | Encodes a counter as 8 big-endian bytes (RFC 4226 section 5.1). |
+| `new_totp_config(label, issuer, digits, period, algorithm)` | `pub function` | Factory constructing a time-based `OtpConfig` (defaults: 6 digits, 30s step, SHA-1). |
+| `new_hotp_config(label, issuer, digits, algorithm)` | `pub function` | Factory constructing a counter-based `OtpConfig` (`period` is `0`). |
+| `make_totp_config(label, issuer, digits, period, algorithm)` | `pub function` | Full validating constructor for time-based `OtpConfig`. |
+| `make_hotp_config(label, issuer, digits, algorithm)` | `pub function` | Full validating constructor for counter-based `OtpConfig`. |
+| `totp_for(cfg, secret, timestamp)` | `pub function` | Config-bound TOTP generation at an explicit timestamp. |
+| `totp_now_for(cfg, secret)` | `pub function` | Config-bound TOTP generation for the current time. |
+| `verify_totp_for(cfg, secret, code, timestamp, window)` | `pub function` (`-> bool`) | Config-bound TOTP verification at an explicit timestamp. |
+| `algorithm_name(algorithm)` | `pub function` | Returns `"SHA1"`, `"SHA256"`, or `"SHA512"` for an `OtpAlgorithm` value. |
+| `build_otpauth_uri(kind, secret, cfg, counter)` | `pub function` (`uri` feature, default-on) | Builds an `otpauth://` enrollment URI; stub throws a descriptive error when the feature is off. |
+| `parse_otpauth_uri(uri)` | `pub function` (`uri` feature, default-on) | Parses an `otpauth://` URI into a parameter map; stub throws a descriptive error when the feature is off. |
+| `OtpAlgorithm` | `pub enum` | Hash selectors (`Sha1 = 0`, `Sha256 = 1`, `Sha512 = 2`). |
+| `OtpConfig` | `pub struct` | Account model (`issuer`, `label`, `digits`, `period`, `algorithm`). |
+| `OtpConfig.summary()` | `pub method` | Single-line summary (e.g. `"Example:alice (6 digits, SHA1)"`). |
+| `OtpConfig.describe()` | `pub method` | Detailed multi-field description. |
+| `OtpConfig.is_valid()` | `pub method` | Returns 1 if the config satisfies OTP constraints, 0 otherwise. |
+| `OtpConfig.is_hotp()` | `pub method` | Returns 1 for counter-based configs (`period == 0`), 0 otherwise. |
+| `OtpConfig.with_digits(new_digits)` | `pub method` | Immutable copy with updated code length. |
+| `OtpConfig.with_algorithm(new_algorithm)` | `pub method` | Immutable copy with updated hash selector. |
 
 > [!TIP]
-> **Internal Helpers & Documentation:** Public symbols are documented with `##` Markdown docstrings, enabling automatic API documentation generation via `alya doc`. Private functions such as `build_salutation` and `build_priority_label` in `src/core/formatter.alya` are not annotated with `pub` and remain encapsulated within their respective modules.
+> **Internal Helpers & Documentation:** Public symbols are documented with `##` Markdown docstrings, enabling automatic API documentation generation via `alya doc`. Private functions such as `truncate_internal`, `digest_internal`, and `find_first_internal` are not annotated with `pub` and remain encapsulated within their respective modules.
 
 ---
 
@@ -150,10 +147,10 @@ Run the automated test suite using `alya test`:
 alya test
 ```
 
-Exercise feature selection (the `extras` slice is default-on):
+Exercise feature selection (the `uri` slice is default-on):
 
 ```bash
-alya test --features extras
+alya test --features uri
 alya test --no-default-features
 ```
 

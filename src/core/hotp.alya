@@ -1,0 +1,117 @@
+## HOTP Generation (RFC 4226)
+##
+## Part of the Alya Language package ecosystem (https://github.com/alya-lang).
+## HMAC-based one-time password construction over an 8-byte big-endian
+## counter with dynamic truncation, backed by `alya-lang/crypto` digests.
+
+import "crypto" as crypto
+import "../types.alya"
+
+## Encodes a counter value as 8 big-endian bytes (RFC 4226 section 5.1).
+##
+## ### Parameters
+## - `counter`: Non-negative moving factor.
+##
+## ### Returns
+## 8-element byte array, most significant byte first.
+pub function counter_to_bytes(counter: int) -> array
+    if counter < 0
+        throw "counter must be non-negative"
+    end
+    let msg = [0, 0, 0, 0, 0, 0, 0, 0]
+    let n = counter
+    let i = 0
+    while i < 8
+        msg[7 - i] = n % 256
+        n /= 256
+        i += 1
+    end
+    return msg
+end
+
+# Internal integer power of ten for digit truncation.
+function pow10_internal(n: int) -> int
+    let p = 1
+    let i = 0
+    while i < n
+        p *= 10
+        i += 1
+    end
+    return p
+end
+
+# Internal HMAC dispatch shared by HOTP and TOTP generators.
+function digest_internal(algorithm: int, key_bytes, msg_bytes) -> array
+    return when algorithm
+        is OtpAlgorithm.Sha256 => crypto::hmac_sha256_bytes(key_bytes, msg_bytes)
+        is OtpAlgorithm.Sha512 => crypto::hmac_sha512_bytes(key_bytes, msg_bytes)
+        else => crypto::hmac_sha1_bytes(key_bytes, msg_bytes)
+    end
+end
+
+# Internal dynamic truncation (RFC 4226 section 5.3) with zero padding.
+function truncate_internal(digest, digits: int) -> string
+    let dlen = len(digest)
+    let offset = bit_and(digest[dlen - 1], 15)
+    let p0 = bit_and(digest[offset], 127)
+    let p1 = bit_and(digest[offset + 1], 255)
+    let p2 = bit_and(digest[offset + 2], 255)
+    let p3 = bit_and(digest[offset + 3], 255)
+    let code = bit_or(bit_or(bit_shl(p0, 24), bit_shl(p1, 16)), bit_or(bit_shl(p2, 8), p3))
+    let otp = code % pow10_internal(digits)
+    let s = str(otp)
+    while len(s) < digits
+        s = "0" + s
+    end
+    return s
+end
+
+## Generates an HOTP value from raw secret bytes (RFC 4226 section 5).
+##
+## ### Parameters
+## - `secret_bytes`: Shared secret byte array (must not be empty).
+## - `counter`: Non-negative moving factor.
+## - `digits`: Code length (6, 7, or 8). Defaults to `6`.
+## - `algorithm`: Hash selector from `OtpAlgorithm`. Defaults to `OtpAlgorithm.Sha1`.
+##
+## ### Returns
+## Zero-padded numeric code string of length `digits`.
+##
+## ### Examples
+## ```alya
+## let key = crypto::str_to_bytes("12345678901234567890")
+## let code = hotp_bytes(key, 0) # "755224"
+## ```
+pub function hotp_bytes(secret_bytes, counter: int, digits: int = 6, algorithm: int = OtpAlgorithm.Sha1) -> string
+    if secret_bytes is null or len(secret_bytes) == 0
+        throw "secret must not be empty"
+    end
+    if digits != 6 and digits != 7 and digits != 8
+        throw "digits must be 6, 7, or 8"
+    end
+    let msg = counter_to_bytes(counter)
+    let digest = digest_internal(algorithm, secret_bytes, msg)
+    return truncate_internal(digest, digits)
+end
+
+## Generates an HOTP value from a Base32-encoded shared secret.
+##
+## Accepts authenticator-style secrets (case-insensitive, padding optional).
+##
+## ### Parameters
+## - `secret`: Base32-encoded shared secret string.
+## - `counter`: Non-negative moving factor.
+## - `digits`: Code length (6, 7, or 8). Defaults to `6`.
+## - `algorithm`: Hash selector from `OtpAlgorithm`. Defaults to `OtpAlgorithm.Sha1`.
+##
+## ### Returns
+## Zero-padded numeric code string of length `digits`.
+##
+## ### Examples
+## ```alya
+## let code = hotp("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", 0) # "755224"
+## ```
+pub function hotp(secret: string, counter: int, digits: int = 6, algorithm: int = OtpAlgorithm.Sha1) -> string
+    let key = crypto::base32_decode_bytes(secret)
+    return hotp_bytes(key, counter, digits, algorithm)
+end

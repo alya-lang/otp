@@ -8,22 +8,20 @@ authors = ["Alya Language Contributors <https://github.com/alya-lang>"]
 license = "MIT"
 homepage = "https://github.com/alya-lang/alya"
 repository = "https://github.com/alya-lang/otp"
-keywords = ["alya", "alya-lang", "package", "otp"]
+keywords = ["alya", "alya-lang", "package", "otp", "hotp", "totp", "2fa", "mfa", "authenticator", "auth", "security", "crypto"]
 
 [dependencies]
-# Optional dependencies install only when an active feature names them:
-# extra = { git = "https://github.com/alya-lang/extra", tag = "v0.1.0", optional = true }
+crypto = { git = "https://github.com/alya-lang/crypto", tag = "v0.1.0" }
 
 # Optional: feature-gated API slices. Members name another feature or an
 # optional dependency; gate the using code with `@cfg(feature = "...")`
 # and provide a `@cfg(not(feature = "..."))` fallback stub (see
-# `src/lib.alya` and `src/core/extras.alya`). `default` is active unless
+# `src/lib.alya` and `src/core/uri.alya`). `default` is active unless
 # the caller passes `--no-default-features`; select features explicitly
 # via `alya build/run/test/bench/install --features <a,b>`.
 [features]
-default = ["extras"]
-extras = []
-# extra = ["extra"]
+default = ["uri"]
+uri = []
 
 # [build]
 # c-sources = ["c/source.c"]
