@@ -1,0 +1,116 @@
+## Steam Guard Codes (Valve 2FA)
+##
+## Part of the Alya Language package ecosystem (https://github.com/alya-lang).
+## Valve's 5-character authenticator codes over HMAC-SHA1 with the
+## `23456789BCDFGHJKMNPQRTVWXY` alphabet. Secrets are Base64-encoded
+## (Steam `shared_secret` format), unlike the Base32 secrets used by
+## the RFC 4226 / RFC 6238 generators in this package.
+
+import "crypto" as crypto
+import "./hotp.alya"
+
+# Internal Steam alphabet (26 unambiguous characters, no vowels).
+function steam_alphabet_internal() -> string
+    return "23456789BCDFGHJKMNPQRTVWXY"
+end
+
+## Generates a Steam Guard code from raw secret bytes at a timestamp.
+##
+## ### Parameters
+## - `secret_bytes`: Shared secret byte array (must not be empty).
+## - `timestamp`: Unix epoch seconds.
+##
+## ### Returns
+## 5-character code string from the Steam alphabet.
+pub function steam_guard_bytes(secret_bytes, timestamp: int) -> string
+    if secret_bytes is null or len(secret_bytes) == 0
+        throw "secret must not be empty"
+    end
+    if timestamp < 0
+        throw "timestamp must be non-negative"
+    end
+    let msg = counter_to_bytes(timestamp / 30)
+    let digest = crypto::hmac_sha1_bytes(secret_bytes, msg)
+    let offset = bit_and(digest[19], 15)
+    let b0 = bit_and(digest[offset], 255)
+    let b1 = bit_and(digest[offset + 1], 255)
+    let b2 = bit_and(digest[offset + 2], 255)
+    let b3 = bit_and(digest[offset + 3], 255)
+    let full = bit_or(bit_or(bit_shl(b0, 24), bit_shl(b1, 16)), bit_or(bit_shl(b2, 8), b3))
+    full = bit_and(full, 2147483647)
+    let alphabet = steam_alphabet_internal()
+    let code = ""
+    let i = 0
+    while i < 5
+        code += char_at(alphabet, full % 26)
+        full /= 26
+        i += 1
+    end
+    return code
+end
+
+## Generates a Steam Guard code from a Base64 secret at a timestamp.
+##
+## ### Parameters
+## - `secret_b64`: Base64-encoded Steam `shared_secret` string.
+## - `timestamp`: Unix epoch seconds.
+##
+## ### Returns
+## 5-character code string from the Steam alphabet.
+##
+## ### Examples
+## ```alya
+## let code = steam_guard("MTIzNDU2Nzg5MDEyMzQ1Njc4OTA=", 59) # "PV9M4"
+## ```
+pub function steam_guard(secret_b64: string, timestamp: int) -> string
+    let key = crypto::base64_decode_bytes(secret_b64)
+    return steam_guard_bytes(key, timestamp)
+end
+
+## Generates a Steam Guard code from a Base64 secret for the current time.
+##
+## ### Parameters
+## - `secret_b64`: Base64-encoded Steam `shared_secret` string.
+##
+## ### Returns
+## 5-character code string from the Steam alphabet.
+pub function steam_guard_now(secret_b64: string) -> string
+    return steam_guard(secret_b64, time())
+end
+
+## Verifies a Steam Guard code at a timestamp with a look-around window.
+##
+## ### Parameters
+## - `secret_b64`: Base64-encoded Steam `shared_secret` string.
+## - `code`: Candidate code string supplied by the user.
+## - `timestamp`: Unix epoch seconds of the verification moment.
+## - `window`: Step allowance in both directions. Defaults to `1`.
+##
+## ### Returns
+## `true` when a step in the window matches, `false` otherwise.
+pub function verify_steam_guard(secret_b64: string, code: string, timestamp: int, window: int = 1) -> bool
+    if window < 0
+        throw "window must be non-negative"
+    end
+    if timestamp < 0
+        throw "timestamp must be non-negative"
+    end
+    let key = crypto::base64_decode_bytes(secret_b64)
+    if len(key) == 0
+        throw "secret must not be empty"
+    end
+    let center = timestamp / 30
+    let c = center - window
+    if c < 0
+        c = 0
+    end
+    let last = center + window
+    while c <= last
+        let candidate = steam_guard_bytes(key, c * 30)
+        if crypto::constant_time_eq(candidate, code)
+            return true
+        end
+        c += 1
+    end
+    return false
+end

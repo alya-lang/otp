@@ -15,7 +15,11 @@ RFC 4226 HOTP and RFC 6238 TOTP one-time password toolkit for Alya backed by aly
 - ⏱️ **RFC 6238 TOTP**: Time-based codes over HOTP with configurable step, epoch offset, and live-clock generation via `time()`
 - 🧮 **Multi-Algorithm HMAC**: SHA-1 (interoperable default) plus SHA-256 and SHA-512 TOTP extensions, dispatched through `OtpAlgorithm`
 - ✅ **Constant-Time Verification**: HOTP resync windows returning the matched counter, TOTP look-around windows, all comparisons via `crypto::constant_time_eq`
+- 🔢 **6/7/8-Digit Codes**: Full digit-length support with truncation-relation conformance tests across SHA-1/256/512
+- ⏳ **Step Countdown Helpers**: `totp_remaining` / `totp_elapsed` plus live variants for authenticator UI rings and progress bars
 - 🎲 **Secret Provisioning**: Fresh random secrets from `crypto::random_bytes`, emitted as unpadded Base32 for authenticator enrollment
+- 🛟 **Backup Codes**: Unbiased numeric recovery codes with constant-time verification and single-use consumption
+- 🎮 **Steam Guard**: Valve's 5-character 2FA codes over Base64 secrets, cross-checked against an independent HMAC reference
 - 🔗 **otpauth Enrollment URIs**: Authenticator QR-code flows with `build_otpauth_uri` / `parse_otpauth_uri` (default-on `uri` feature slice)
 - 🧪 **RFC Test Vectors**: Full Appendix D (HOTP) and Appendix B (TOTP SHA-1/256/512) conformance coverage in `tests/test_basic.alya`
 - 📦 **Zero Native Code**: Pure Alya on top of `alya-lang/crypto` — no C toolchain beyond the standard compiler pipeline
@@ -36,7 +40,10 @@ otp/
 │   ├── types.alya          # Data models: OtpAlgorithm enum, OtpConfig struct, factories, methods
 │   └── core/               # Subdirectory module hierarchy
 │       ├── hotp.alya       # HOTP generation: counter encoding, digest dispatch, truncation
-│       ├── totp.alya       # TOTP generation, verify_hotp/verify_totp, generate_secret
+│       ├── totp.alya       # TOTP generation, verifiers, time-step countdown helpers
+│       ├── secret.alya     # Secret provisioning (Base32/hex) and validation
+│       ├── backup.alya     # Single-use numeric backup codes with consumption
+│       ├── steam.alya      # Steam Guard 5-character codes over Base64 secrets
 │       └── uri.alya        # Feature-gated (`uri`) otpauth enrollment URI builder & parser
 ├── examples/
 │   └── demo.alya           # Comprehensive runnable walkthrough of all package capabilities
@@ -114,6 +121,20 @@ main()
 | `verify_totp(secret, code, timestamp, window, step, t0, digits, algorithm)` | `pub function` (`-> bool`) | Verifies a TOTP code with a look-around window at an explicit timestamp. |
 | `verify_totp_now(secret, code, window, step, t0, digits, algorithm)` | `pub function` (`-> bool`) | Verifies a TOTP code against the current time. |
 | `generate_secret(length)` | `pub function` | Generates a fresh random secret as unpadded Base32. Defaults to `20` bytes. |
+| `generate_secret_hex(length)` | `pub function` | Generates a fresh random secret as lowercase hex. Defaults to `20` bytes. |
+| `is_valid_secret(secret)` | `pub function` (`-> bool`) | Returns `true` when a Base32 string decodes to a non-empty secret. |
+| `totp_counter(timestamp, step, t0)` | `pub function` | Returns the TOTP moving-factor counter for a timestamp. |
+| `totp_elapsed(timestamp, step, t0)` | `pub function` | Returns seconds elapsed within the current step (`[0, step - 1]`). |
+| `totp_remaining(timestamp, step, t0)` | `pub function` | Returns seconds before the current code expires (`[1, step]`). |
+| `totp_elapsed_now(step, t0)` | `pub function` | Live variant of `totp_elapsed` for the current time. |
+| `totp_remaining_now(step, t0)` | `pub function` | Live variant of `totp_remaining` for the current time. |
+| `generate_backup_codes(count, length)` | `pub function` | Generates unbiased numeric backup codes (defaults: 10 codes, 8 digits). |
+| `verify_backup_code(codes, candidate)` | `pub function` (`-> bool`) | Constant-time backup code check without consuming. |
+| `consume_backup_code(codes, candidate)` | `pub function` | Burns a matching code; returns the remaining list or null. |
+| `steam_guard(secret_b64, timestamp)` | `pub function` | Generates a 5-character Steam Guard code from a Base64 secret. |
+| `steam_guard_bytes(secret_bytes, timestamp)` | `pub function` | Generates a Steam Guard code from raw secret bytes. |
+| `steam_guard_now(secret_b64)` | `pub function` | Live Steam Guard code for the current time. |
+| `verify_steam_guard(secret_b64, code, timestamp, window)` | `pub function` (`-> bool`) | Verifies a Steam Guard code with a look-around window. |
 | `counter_to_bytes(counter)` | `pub function` | Encodes a counter as 8 big-endian bytes (RFC 4226 section 5.1). |
 | `new_totp_config(label, issuer, digits, period, algorithm)` | `pub function` | Factory constructing a time-based `OtpConfig` (defaults: 6 digits, 30s step, SHA-1). |
 | `new_hotp_config(label, issuer, digits, algorithm)` | `pub function` | Factory constructing a counter-based `OtpConfig` (`period` is `0`). |

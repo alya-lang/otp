@@ -231,6 +231,146 @@ function main()
     @cfg(feature = "uri")
     runner_assert_eq(r, uri_error_path_throws(), true, "non-otpauth uri throws")
 
+    # ═══════════════════════════════════════════════════════════
+    # 11. Digit-Length Support (6, 7, 8 with truncation relations)
+    # ═══════════════════════════════════════════════════════════
+    let c8 = pkg::hotp(rfc4226_b32, 0, 8)
+    let c7 = pkg::hotp(rfc4226_b32, 0, 7)
+    let c6 = pkg::hotp(rfc4226_b32, 0, 6)
+    runner_assert_eq(r, len(c8), 8, "hotp 8-digit length")
+    runner_assert_eq(r, len(c7), 7, "hotp 7-digit length")
+    runner_assert_eq(r, len(c6), 6, "hotp 6-digit length")
+    runner_assert_str_eq(r, c7, substring(c8, 1, 7), "7-digit is 8-digit tail")
+    runner_assert_str_eq(r, c6, substring(c8, 2, 6), "6-digit is 8-digit tail")
+    runner_assert_str_eq(r, c6, "755224", "6-digit matches RFC 4226 vector")
+
+    let t8 = pkg::totp_at(rfc4226_b32, 1111111109, 30, 0, 8)
+    let t7 = pkg::totp_at(rfc4226_b32, 1111111109, 30, 0, 7)
+    let t6 = pkg::totp_at(rfc4226_b32, 1111111109, 30, 0, 6)
+    runner_assert_str_eq(r, t7, substring(t8, 1, 7), "totp 7-digit is 8-digit tail")
+    runner_assert_str_eq(r, t6, substring(t8, 2, 6), "totp 6-digit is 8-digit tail")
+
+    let s8 = pkg::hotp_bytes(sha256_key, 4, 8, pkg::OtpAlgorithm.Sha256)
+    runner_assert_str_eq(r, pkg::hotp_bytes(sha256_key, 4, 6, pkg::OtpAlgorithm.Sha256), substring(s8, 2, 6), "sha256 6-digit tail")
+    let p8 = pkg::hotp_bytes(sha512_key, 4, 8, pkg::OtpAlgorithm.Sha512)
+    runner_assert_str_eq(r, pkg::hotp_bytes(sha512_key, 4, 7, pkg::OtpAlgorithm.Sha512), substring(p8, 1, 7), "sha512 7-digit tail")
+
+    # ═══════════════════════════════════════════════════════════
+    # 12. Time-Step Helpers
+    # ═══════════════════════════════════════════════════════════
+    runner_assert_eq(r, pkg::totp_counter(0), 0, "counter at t=0")
+    runner_assert_eq(r, pkg::totp_counter(29), 0, "counter at t=29")
+    runner_assert_eq(r, pkg::totp_counter(30), 1, "counter at t=30")
+    runner_assert_eq(r, pkg::totp_counter(59), 1, "counter at t=59")
+    runner_assert_eq(r, pkg::totp_elapsed(0), 0, "elapsed at step start")
+    runner_assert_eq(r, pkg::totp_elapsed(59), 29, "elapsed at step end")
+    runner_assert_eq(r, pkg::totp_remaining(0), 30, "remaining at step start")
+    runner_assert_eq(r, pkg::totp_remaining(59), 1, "remaining at step end")
+    runner_assert_eq(r, pkg::totp_remaining(30), 30, "remaining resets on boundary")
+
+    threw = false
+    try
+        pkg::totp_counter(10, 0)
+    catch err
+        threw = true
+    end
+    runner_assert_eq(r, threw, true, "zero step counter throws")
+
+    # ═══════════════════════════════════════════════════════════
+    # 13. Secret Provisioning & Validation
+    # ═══════════════════════════════════════════════════════════
+    let hex_sec = pkg::generate_secret_hex()
+    runner_assert_eq(r, len(hex_sec), 40, "generate_secret_hex default 40 chars")
+    runner_assert_eq(r, pkg::is_valid_secret(rfc4226_b32), true, "RFC secret is valid")
+    runner_assert_eq(r, pkg::is_valid_secret("jbswy3dpehpk3pxp"), true, "lowercase secret is valid")
+    runner_assert_eq(r, pkg::is_valid_secret("!!!"), false, "non-alphabet secret invalid")
+    runner_assert_eq(r, pkg::is_valid_secret(""), false, "empty secret invalid")
+    runner_assert_eq(r, pkg::is_valid_secret(null), false, "null secret invalid")
+
+    threw = false
+    try
+        pkg::generate_secret_hex(0)
+    catch err
+        threw = true
+    end
+    runner_assert_eq(r, threw, true, "zero-length hex secret throws")
+
+    # ═══════════════════════════════════════════════════════════
+    # 14. Backup Codes
+    # ═══════════════════════════════════════════════════════════
+    let backups = pkg::generate_backup_codes(5, 8)
+    runner_assert_eq(r, len(backups), 5, "5 backup codes generated")
+    runner_assert_eq(r, len(backups[0]), 8, "backup code length 8")
+    let all_digits = true
+    let bi = 0
+    while bi < len(backups)
+        let bj = 0
+        while bj < len(backups[bi])
+            let d = ord(char_at(backups[bi], bj)) - ord("0")
+            if d < 0 or d > 9
+                all_digits = false
+            end
+            bj += 1
+        end
+        bi += 1
+    end
+    runner_assert_eq(r, all_digits, true, "backup codes are numeric")
+    runner_assert_eq(r, pkg::verify_backup_code(backups, backups[2]), true, "backup code verifies")
+    runner_assert_eq(r, pkg::verify_backup_code(backups, "00000000"), false, "unknown backup code rejected")
+    runner_assert_eq(r, pkg::verify_backup_code(null, backups[0]), false, "null set rejected")
+
+    let rest = pkg::consume_backup_code(backups, backups[2])
+    runner_assert_eq(r, len(rest), 4, "consumed set shrinks by one")
+    runner_assert_eq(r, pkg::verify_backup_code(rest, backups[2]), false, "consumed code no longer verifies")
+    let double_spend = pkg::consume_backup_code(rest, backups[2])
+    runner_assert_eq(r, double_spend is null, true, "double consume returns null")
+    let unknown_spend = pkg::consume_backup_code(rest, "00000000")
+    runner_assert_eq(r, unknown_spend is null, true, "unknown consume returns null")
+
+    threw = false
+    try
+        pkg::generate_backup_codes(0, 8)
+    catch err
+        threw = true
+    end
+    runner_assert_eq(r, threw, true, "zero-count backup throws")
+
+    threw = false
+    try
+        pkg::generate_backup_codes(10, 3)
+    catch err
+        threw = true
+    end
+    runner_assert_eq(r, threw, true, "short backup code throws")
+
+    # ═══════════════════════════════════════════════════════════
+    # 15. Steam Guard (vectors cross-checked with Python hmac)
+    # ═══════════════════════════════════════════════════════════
+    let steam_b64 = "MTIzNDU2Nzg5MDEyMzQ1Njc4OTA="
+    runner_assert_str_eq(r, pkg::steam_guard(steam_b64, 0), "GG5F5", "steam T=0")
+    runner_assert_str_eq(r, pkg::steam_guard(steam_b64, 29), "GG5F5", "steam same step")
+    runner_assert_str_eq(r, pkg::steam_guard(steam_b64, 30), "PV9M4", "steam step boundary")
+    runner_assert_str_eq(r, pkg::steam_guard(steam_b64, 59), "PV9M4", "steam T=59")
+    runner_assert_str_eq(r, pkg::steam_guard(steam_b64, 1111111109), "PY4YB", "steam T=1111111109")
+    runner_assert_str_eq(r, pkg::steam_guard(steam_b64, 2000000000), "9N776", "steam T=2000000000")
+    runner_assert_str_eq(r, pkg::steam_guard("AAECAwQFBgcICQoLDA0ODxAREhM=", 59), "YH76M", "steam second secret T=59")
+    runner_assert_str_eq(r, pkg::steam_guard("AAECAwQFBgcICQoLDA0ODxAREhM=", 1234567890), "P48QM", "steam second secret T=1234567890")
+
+    let live_steam = pkg::steam_guard_now(steam_b64)
+    runner_assert_eq(r, len(live_steam), 5, "steam_guard_now 5-char length")
+    runner_assert_eq(r, pkg::verify_steam_guard(steam_b64, live_steam, time()), true, "steam live roundtrip")
+
+    runner_assert_eq(r, pkg::verify_steam_guard(steam_b64, "PV9M4", 59), true, "steam verify exact")
+    runner_assert_eq(r, pkg::verify_steam_guard(steam_b64, "XXXXX", 59), false, "steam verify rejects")
+
+    threw = false
+    try
+        pkg::steam_guard("!!!", 59)
+    catch err
+        threw = true
+    end
+    runner_assert_eq(r, threw, true, "empty steam secret throws")
+
     let failed = runner_summary(r)
     if failed > 0
         exit(1)

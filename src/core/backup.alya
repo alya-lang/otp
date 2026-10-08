@@ -1,0 +1,119 @@
+## Single-Use Backup Codes (2FA recovery)
+##
+## Part of the Alya Language package ecosystem (https://github.com/alya-lang).
+## Numeric recovery codes issued at enrollment time. Codes are generated
+## with rejection sampling (unbiased digits) and compared in constant
+## time; consumption returns an updated list with the used code removed.
+
+import "crypto" as crypto
+
+# Internal unbiased decimal digit via rejection sampling (250 is a
+# multiple of 10, so `byte % 10` below is uniformly distributed).
+function random_digit_internal() -> int
+    while true
+        let drawn = crypto::random_bytes(1)
+        if drawn[0] < 250
+            return drawn[0] % 10
+        end
+    end
+end
+
+## Generates a set of single-use numeric backup codes.
+##
+## ### Parameters
+## - `count`: Number of codes to generate. Defaults to `10`.
+## - `length`: Digits per code (minimum 4). Defaults to `8`.
+##
+## ### Returns
+## Array of zero-padded numeric code strings.
+##
+## ### Examples
+## ```alya
+## let codes = generate_backup_codes() # 10 codes, 8 digits each
+## ```
+pub function generate_backup_codes(count: int = 10, length: int = 8) -> array
+    if count <= 0
+        throw "count must be positive"
+    end
+    if length < 4
+        throw "length must be at least 4"
+    end
+    let codes = []
+    let i = 0
+    while i < count
+        let code = ""
+        let j = 0
+        while j < length
+            code += str(random_digit_internal())
+            j += 1
+        end
+        codes.push(code)
+        i += 1
+    end
+    return codes
+end
+
+## Checks whether a candidate matches any unused backup code.
+##
+## Comparison uses `crypto::constant_time_eq` per code. The code list is
+## left untouched; use `consume_backup_code` to burn a code after use.
+##
+## ### Parameters
+## - `codes`: Array of unused backup code strings (or null).
+## - `candidate`: User-supplied code string.
+##
+## ### Returns
+## `true` on match, `false` otherwise.
+pub function verify_backup_code(codes, candidate: string) -> bool
+    if codes is null or candidate is null
+        return false
+    end
+    let i = 0
+    while i < len(codes)
+        if crypto::constant_time_eq(codes[i], candidate)
+            return true
+        end
+        i += 1
+    end
+    return false
+end
+
+## Burns a matching backup code, returning the remaining list.
+##
+## Removes the first matching entry so each code is accepted exactly
+## once. Persist the returned array as the new unused-code set.
+##
+## ### Parameters
+## - `codes`: Array of unused backup code strings.
+## - `candidate`: User-supplied code string.
+##
+## ### Returns
+## Updated array without the consumed code, or null when no code matches.
+##
+## ### Examples
+## ```alya
+## let rest = consume_backup_code(codes, user_input)
+## if rest is null
+##     say "rejected"
+## end
+## ```
+pub function consume_backup_code(codes, candidate: string)
+    if codes is null or candidate is null
+        return null
+    end
+    let rest = []
+    let burned = false
+    let i = 0
+    while i < len(codes)
+        if burned == false and crypto::constant_time_eq(codes[i], candidate)
+            burned = true
+        else
+            rest.push(codes[i])
+        end
+        i += 1
+    end
+    if burned == false
+        return null
+    end
+    return rest
+end

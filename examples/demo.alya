@@ -48,14 +48,44 @@ function main()
     # ───────────────────────────────────────────────────────────
     # 5. Secret provisioning
     # ───────────────────────────────────────────────────────────
-    say "--- 5. Fresh Secret ---"
-    say "generate_secret(): " + pkg::generate_secret()
+    say "--- 5. Fresh Secrets ---"
+    say "generate_secret():     " + pkg::generate_secret()
+    say "generate_secret_hex(): " + pkg::generate_secret_hex(8)
+    say "is_valid_secret:       " + str(pkg::is_valid_secret(secret))
     say ""
 
     # ───────────────────────────────────────────────────────────
-    # 6. otpauth enrollment URI (`uri` feature, default-on)
+    # 6. Time-step countdown helpers
     # ───────────────────────────────────────────────────────────
-    say "--- 6. Enrollment URI ---"
+    say "--- 6. Step Countdown ---"
+    say "remaining now: " + str(pkg::totp_remaining_now()) + "s"
+    say "elapsed now:   " + str(pkg::totp_elapsed_now()) + "s"
+    say ""
+
+    # ───────────────────────────────────────────────────────────
+    # 7. Backup codes
+    # ───────────────────────────────────────────────────────────
+    say "--- 7. Backup Codes ---"
+    let backups = pkg::generate_backup_codes(3, 8)
+    say "code[0]: " + backups[0]
+    say "verify:  " + str(pkg::verify_backup_code(backups, backups[0]))
+    let rest = pkg::consume_backup_code(backups, backups[0])
+    say "left after consume: " + str(len(rest))
+    say ""
+
+    # ───────────────────────────────────────────────────────────
+    # 8. Steam Guard
+    # ───────────────────────────────────────────────────────────
+    say "--- 8. Steam Guard ---"
+    let steam_b64 = "MTIzNDU2Nzg5MDEyMzQ1Njc4OTA="
+    say "steam_guard(T=59): " + pkg::steam_guard(steam_b64, 59)
+    say "live:              " + pkg::steam_guard_now(steam_b64)
+    say ""
+
+    # ───────────────────────────────────────────────────────────
+    # 9. otpauth enrollment URI (`uri` feature, default-on)
+    # ───────────────────────────────────────────────────────────
+    say "--- 9. Enrollment URI ---"
     @cfg(feature = "uri")
     say "URI: " + pkg::build_otpauth_uri("totp", secret, cfg)
     @cfg(not(feature = "uri"))

@@ -54,6 +54,34 @@ function main()
     end
     bench_stop(runner, "cfg.summary() 50k calls")
 
+    # Bench 6: steam_guard() generation — 200 iterations
+    let steam_b64 = "MTIzNDU2Nzg5MDEyMzQ1Njc4OTA="
+    bench_start(runner, 200)
+    let g = 0
+    while g < 200
+        pkg::steam_guard(steam_b64, 59)
+        g += 1
+    end
+    bench_stop(runner, "steam_guard() 200 calls")
+
+    # Bench 7: totp_remaining() step arithmetic — 50k iterations
+    bench_start(runner, 50000)
+    let p = 0
+    while p < 50000
+        pkg::totp_remaining(59)
+        p += 1
+    end
+    bench_stop(runner, "totp_remaining() 50k calls")
+
+    # Bench 8: generate_backup_codes() 10x8 — 20 iterations
+    bench_start(runner, 20)
+    let b = 0
+    while b < 20
+        pkg::generate_backup_codes()
+        b += 1
+    end
+    bench_stop(runner, "generate_backup_codes() 20 calls")
+
     bench_summary(runner)
 end
 

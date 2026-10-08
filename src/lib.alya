@@ -8,6 +8,9 @@
 import "./types.alya"
 import "./core/hotp.alya"
 import "./core/totp.alya"
+import "./core/secret.alya"
+import "./core/backup.alya"
+import "./core/steam.alya"
 @cfg(feature = "uri")
 import "./core/uri.alya"
 

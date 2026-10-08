@@ -163,25 +163,89 @@ pub function verify_totp_now(secret: string, code: string, window: int = 1, step
     return verify_totp(secret, code, time(), window, step, t0, digits, algorithm)
 end
 
-## Generates a fresh random shared secret for authenticator enrollment.
+# ───────────────────────────────────────────────────────────────
+# Time-Step Helpers (authenticator UI countdowns)
+# ───────────────────────────────────────────────────────────────
+
+# Internal shared validation for step arithmetic.
+function check_step_internal(timestamp: int, step: int, t0: int) -> int
+    if step <= 0
+        throw "step must be positive"
+    end
+    if timestamp < t0
+        throw "timestamp must not precede t0"
+    end
+    return (timestamp - t0) / step
+end
+
+## Returns the TOTP counter for an explicit timestamp.
 ##
-## Uses `crypto::random_bytes` and returns unpadded Base32, ready to embed
-## in an `otpauth://` URI or QR code.
+## Exposes the `(timestamp - t0) / step` moving factor so callers can
+## display, log, or cross-check counters without generating a code.
 ##
 ## ### Parameters
-## - `length`: Random byte count (20 bytes is the interoperable default). Defaults to `20`.
+## - `timestamp`: Unix epoch seconds.
+## - `step`: Time step in seconds. Defaults to `30`.
+## - `t0`: Start epoch offset. Defaults to `0`.
 ##
 ## ### Returns
-## Unpadded Base32-encoded secret string.
+## Non-negative counter integer.
+pub function totp_counter(timestamp: int, step: int = 30, t0: int = 0) -> int
+    return check_step_internal(timestamp, step, t0)
+end
+
+## Returns seconds elapsed within the current time step.
 ##
-## ### Examples
-## ```alya
-## let secret = generate_secret() # e.g. "JBSWY3DPEHPK3PXP..."
-## ```
-pub function generate_secret(length: int = 20) -> string
-    if length <= 0
-        throw "length must be positive"
-    end
-    let raw = crypto::random_bytes(length)
-    return crypto::base32_encode_bytes(raw, 0)
+## Useful for progress indicators (0 at step start, `step - 1` at step end).
+##
+## ### Parameters
+## - `timestamp`: Unix epoch seconds.
+## - `step`: Time step in seconds. Defaults to `30`.
+## - `t0`: Start epoch offset. Defaults to `0`.
+##
+## ### Returns
+## Elapsed seconds in `[0, step - 1]`.
+pub function totp_elapsed(timestamp: int, step: int = 30, t0: int = 0) -> int
+    check_step_internal(timestamp, step, t0)
+    return (timestamp - t0) % step
+end
+
+## Returns seconds remaining before the current code expires.
+##
+## Useful for countdown rings (`step` at step start, `1` at step end).
+##
+## ### Parameters
+## - `timestamp`: Unix epoch seconds.
+## - `step`: Time step in seconds. Defaults to `30`.
+## - `t0`: Start epoch offset. Defaults to `0`.
+##
+## ### Returns
+## Remaining seconds in `[1, step]`.
+pub function totp_remaining(timestamp: int, step: int = 30, t0: int = 0) -> int
+    check_step_internal(timestamp, step, t0)
+    return step - ((timestamp - t0) % step)
+end
+
+## Returns seconds elapsed within the current live time step.
+##
+## ### Parameters
+## - `step`: Time step in seconds. Defaults to `30`.
+## - `t0`: Start epoch offset. Defaults to `0`.
+##
+## ### Returns
+## Elapsed seconds in `[0, step - 1]`.
+pub function totp_elapsed_now(step: int = 30, t0: int = 0) -> int
+    return totp_elapsed(time(), step, t0)
+end
+
+## Returns seconds remaining before the current live code expires.
+##
+## ### Parameters
+## - `step`: Time step in seconds. Defaults to `30`.
+## - `t0`: Start epoch offset. Defaults to `0`.
+##
+## ### Returns
+## Remaining seconds in `[1, step]`.
+pub function totp_remaining_now(step: int = 30, t0: int = 0) -> int
+    return totp_remaining(time(), step, t0)
 end
