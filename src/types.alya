@@ -158,7 +158,7 @@ pub function OtpConfig.summary(self: OtpConfig) -> string
     if self.issuer != ""
         who = self.issuer + ":" + self.label
     end
-    return "{who} ({self.digits} digits, {algorithm_name(self.algorithm)})"
+    return f"{who} ({self.digits} digits, {algorithm_name(self.algorithm)})"
 end
 
 ## Returns a detailed multi-attribute description of this configuration.
@@ -169,7 +169,7 @@ end
 ## ### Returns
 ## Detailed descriptive string including period and algorithm code.
 pub function OtpConfig.describe(self: OtpConfig) -> string
-    return "[OtpConfig] issuer={self.issuer}, label={self.label}, digits={self.digits}, period={self.period}, algorithm={self.algorithm}"
+    return f"[OtpConfig] issuer={self.issuer}, label={self.label}, digits={self.digits}, period={self.period}, algorithm={self.algorithm}"
 end
 
 ## Validates whether this configuration conforms to OTP constraints.
