@@ -74,6 +74,24 @@ alya add otp --git https://github.com/alya-lang/otp --branch main
 alya install
 ```
 
+### Package Features
+
+| Feature | Default | Description |
+|:---|:---:|:---|
+| `uri` | ✅ | otpauth URI building and parsing (`build_otpauth_uri`, `parse_otpauth_uri`). |
+
+Core HOTP/TOTP generation and verification always work.
+
+```bash
+# Full build (default)
+alya install
+alya test
+
+# Slim build (core only)
+alya install --no-default-features
+alya test --no-default-features
+```
+
 ---
 
 ## 🚀 Quick Start
